@@ -120,3 +120,7 @@ LINK_TYPES = {
     DP_LINK_TYPE_SYNONYM: 'projects/dataplex-types/locations/global/entryLinkTypes/synonym',
     DP_LINK_TYPE_RELATED: 'projects/dataplex-types/locations/global/entryLinkTypes/related'
 }
+
+# --- Google Sheets Headers ---
+ENTRYLINK_SHEET_HEADERS = ["Entry link type", "Source", "Column", "Target"]
+LEGACY_ENTRYLINK_SHEET_HEADERS = ["entry_link_type", "source_entry", "target_entry", "source_path"]

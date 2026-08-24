@@ -35,7 +35,7 @@ class TestBuildDeduplicationKey:
     
     def test_symmetric_link_type_sorts_entries(self):
         """All link types should create sorted key to detect A-B == B-A"""
-        row = ['related', 'entryB', 'entryA', '']
+        row = ['related', 'entryB', '', 'entryA']
         key = entrylinks_export._build_deduplication_key(row)
         
         # Should be sorted: ('related', ('entryA', 'entryB'), '')
@@ -44,30 +44,30 @@ class TestBuildDeduplicationKey:
     
     def test_synonym_link_type_is_symmetric(self):
         """Synonym links should also be deduplicated symmetrically"""
-        row1 = ['synonym', 'termA', 'termB', '']
-        row2 = ['synonym', 'termB', 'termA', '']
+        row1 = ['synonym', 'termA', '', 'termB']
+        row2 = ['synonym', 'termB', '', 'termA']
         
         key1 = entrylinks_export._build_deduplication_key(row1)
         key2 = entrylinks_export._build_deduplication_key(row2)
         
         assert key1 == key2
     
-    def test_definition_link_type_also_sorts(self):
-        """Definition links also sort source/target for deduplication"""
-        row1 = ['definition', 'source', 'target', '/path']
-        row2 = ['definition', 'target', 'source', '/path']
+    def test_definition_link_type_is_directional(self):
+        """Definition links are directional (source asset -> target term)"""
+        row1 = ['definition', 'source', 'col', 'target']
+        row2 = ['definition', 'target', 'col', 'source']
         
         key1 = entrylinks_export._build_deduplication_key(row1)
         key2 = entrylinks_export._build_deduplication_key(row2)
         
-        assert key1 == key2
+        assert key1 != key2
     
     def test_includes_source_path(self):
-        """Keys should include source_path"""
-        row = ['definition', 'source', 'target', '/schema/table']
+        """Keys should include column / source_path"""
+        row = ['definition', 'source', 'col1', 'target']
         key = entrylinks_export._build_deduplication_key(row)
         
-        assert '/schema/table' in key
+        assert 'col1' in key
     
     def test_missing_source_path_uses_empty_string(self):
         """Rows with only 3 elements should use empty string for path"""
@@ -84,8 +84,8 @@ class TestDeduplicateEntryLinks:
     def test_removes_duplicate_symmetric_links(self):
         """Should remove A-B if B-A already exists for symmetric types"""
         links = [
-            ['related', 'term1', 'term2', ''],
-            ['related', 'term2', 'term1', ''],  # Duplicate
+            ['related', 'term1', '', 'term2'],
+            ['related', 'term2', '', 'term1'],  # Duplicate
         ]
         
         result = entrylinks_export.deduplicate_entry_links(links)
@@ -95,8 +95,8 @@ class TestDeduplicateEntryLinks:
     def test_keeps_different_link_types(self):
         """Different link types between same entries should be kept"""
         links = [
-            ['related', 'term1', 'term2', ''],
-            ['synonym', 'term1', 'term2', ''],
+            ['related', 'term1', '', 'term2'],
+            ['synonym', 'term1', '', 'term2'],
         ]
         
         result = entrylinks_export.deduplicate_entry_links(links)
@@ -106,8 +106,8 @@ class TestDeduplicateEntryLinks:
     def test_keeps_directional_links_both_directions(self):
         """Definition links in both directions should be kept"""
         links = [
-            ['definition', 'term1', 'table1', '/path1'],
-            ['definition', 'table1', 'term1', '/path2'],
+            ['definition', 'table1', 'col1', 'term1'],
+            ['definition', 'table2', 'col2', 'term1'],
         ]
         
         result = entrylinks_export.deduplicate_entry_links(links)
@@ -122,13 +122,14 @@ class TestDeduplicateEntryLinks:
     def test_preserves_order_of_first_occurrence(self):
         """First occurrence of link should be kept"""
         links = [
-            ['related', 'A', 'B', ''],
-            ['related', 'B', 'A', ''],  # Duplicate - should be removed
+            ['related', 'A', '', 'B'],
+            ['related', 'B', '', 'A'],  # Duplicate - should be removed
         ]
         
         result = entrylinks_export.deduplicate_entry_links(links)
         
-        assert result[0] == ['related', 'A', 'B', '']
+        assert result[0] == ['related', 'A', '', 'B']
+
 
 
 # ============================================================================

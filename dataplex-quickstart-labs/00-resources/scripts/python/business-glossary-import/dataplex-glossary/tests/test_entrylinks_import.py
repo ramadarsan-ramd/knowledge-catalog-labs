@@ -452,11 +452,90 @@ class TestRunImportWorkflow:
         monkeypatch.setattr(entrylinks_import.sheet_utils, 'get_sheet_name_for_url', lambda url: 'Sheet1')
         monkeypatch.setattr(entrylinks_import.api_layer, 'authenticate_dataplex', MagicMock)
         monkeypatch.setattr(entrylinks_import, 'check_and_clean_archive_folder', lambda d: True)
-        monkeypatch.setattr(entrylinks_import, 'convert_spreadsheet_to_entrylinks', lambda url, sheet_name: [])
+        monkeypatch.setattr(entrylinks_import, 'convert_spreadsheet_to_entrylinks', lambda *args, **kwargs: [])
         
         result = entrylinks_import._run_import_workflow(mock_parsed_args)
         
         assert result == 1
+
+
+class TestResolutionHelpers:
+    """Test resolution helpers for human-readable identifiers and FQNs"""
+
+    def test_resolve_source_entry_passthrough_full_path(self):
+        """Full entry paths starting with projects/ should pass through unchanged"""
+        full_path = 'projects/p/locations/l/entryGroups/@dataplex/entries/.../terms/t'
+        result = entrylinks_import._resolve_source_entry_name(full_path, 'definition')
+        assert result == full_path
+
+    def test_resolve_source_entry_definition_fqn(self, monkeypatch):
+        """Definition source FQN should be resolved via lookup_entry_by_fqn"""
+        mock_service = Mock()
+        monkeypatch.setattr(
+            entrylinks_import.api_layer, 'lookup_entry_by_fqn',
+            lambda s, fqn, p: 'projects/p/locations/us/entryGroups/@bigquery/entries/e1'
+        )
+        result = entrylinks_import._resolve_source_entry_name(
+            'bigquery:my_proj.my_ds.my_table', 'definition',
+            dataplex_service=mock_service, user_project='my_proj'
+        )
+        assert result == 'projects/p/locations/us/entryGroups/@bigquery/entries/e1'
+
+    def test_resolve_source_entry_synonym_identifier(self, monkeypatch):
+        """Synonym source term identifier should be resolved via lookup_term_by_display_identifier"""
+        mock_service = Mock()
+        monkeypatch.setattr(
+            entrylinks_import.api_layer, 'lookup_term_by_display_identifier',
+            lambda s, term_id, p: 'projects/p/locations/global/entryGroups/@dataplex/entries/.../terms/t1'
+        )
+        result = entrylinks_import._resolve_source_entry_name(
+            'my_proj.global.Sales.Order ID', 'synonym',
+            dataplex_service=mock_service, user_project='my_proj'
+        )
+        assert result == 'projects/p/locations/global/entryGroups/@dataplex/entries/.../terms/t1'
+
+    def test_resolve_target_entry_identifier(self, monkeypatch):
+        """Target term identifier should be resolved via lookup_term_by_display_identifier"""
+        mock_service = Mock()
+        monkeypatch.setattr(
+            entrylinks_import.api_layer, 'lookup_term_by_display_identifier',
+            lambda s, term_id, p: 'projects/p/locations/global/entryGroups/@dataplex/entries/.../terms/t2'
+        )
+        result = entrylinks_import._resolve_target_entry_name(
+            'my_proj.global.Sales.Customer ID',
+            dataplex_service=mock_service, user_project='my_proj'
+        )
+        assert result == 'projects/p/locations/global/entryGroups/@dataplex/entries/.../terms/t2'
+
+    def test_build_entry_link_resolves_and_builds(self, monkeypatch):
+        """build_entry_link should resolve human-readable fields and return valid EntryLink"""
+        from utils.models import SpreadsheetRow
+        mock_service = Mock()
+        monkeypatch.setattr(
+            entrylinks_import.api_layer, 'lookup_entry_by_fqn',
+            lambda s, fqn, p: 'projects/p/locations/us/entryGroups/@bigquery/entries/e1'
+        )
+        monkeypatch.setattr(
+            entrylinks_import.api_layer, 'lookup_term_by_display_identifier',
+            lambda s, term_id, p: 'projects/p/locations/global/entryGroups/@dataplex/entries/.../terms/t1'
+        )
+
+        row = SpreadsheetRow(
+            entry_link_type='definition',
+            source='bigquery:my_proj.my_ds.my_table',
+            column='order_id',
+            target='my_proj.global.Sales.Order ID'
+        )
+
+        link = entrylinks_import.build_entry_link(row, dataplex_service=mock_service, user_project='my_proj')
+        assert link is not None
+        assert link.entryLinkType == 'projects/dataplex-types/locations/global/entryLinkTypes/definition'
+        assert len(link.entryReferences) == 2
+        assert link.entryReferences[0].name == 'projects/p/locations/us/entryGroups/@bigquery/entries/e1'
+        assert link.entryReferences[0].path == 'Schema.order_id'
+        assert link.entryReferences[1].name == 'projects/p/locations/global/entryGroups/@dataplex/entries/.../terms/t1'
+
+
 
 
 # ============================================================================

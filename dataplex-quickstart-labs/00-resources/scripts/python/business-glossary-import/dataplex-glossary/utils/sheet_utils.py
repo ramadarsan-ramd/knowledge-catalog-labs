@@ -173,7 +173,8 @@ def write_to_sheet(sheets_service, spreadsheet_id: str, row_data: List[List[str]
 
 def _apply_sheet_formatting(sheets_service, spreadsheet_id: str, sheet_id: int, row_count: int) -> None:
     """Apply formatting to entrylinks sheet."""
-    column_widths = [(0, 120), (1, 450), (2, 450), (3, 200)]
+    # [Entry link type (140px), Source (420px), Column (180px), Target (420px)]
+    column_widths = [(0, 140), (1, 420), (2, 180), (3, 420)]
     requests = []
     
     for col_index, width in column_widths:
@@ -255,8 +256,12 @@ def _find_source_and_target_refs(entry_references: List[Dict]) -> tuple:
     return first_ref, second_ref
 
 
-def entry_links_to_rows(entry_links: List[Dict[str, Any]]) -> List[List[str]]:
-    """Convert EntryLinks to spreadsheet row format."""
+def entry_links_to_rows(
+    entry_links: List[Dict[str, Any]], 
+    dataplex_service=None, 
+    user_project: str = ""
+) -> List[List[str]]:
+    """Convert EntryLinks to spreadsheet row format [Entry link type, Source, Column, Target]."""
     spreadsheet_rows = []
     redacted_link_count = 0
     
@@ -279,7 +284,10 @@ def entry_links_to_rows(entry_links: List[Dict[str, Any]]) -> List[List[str]]:
         source_ref, target_ref = _find_source_and_target_refs(entry_references)
         
         if source_ref and target_ref:
-            _add_entry_link_to_rows(spreadsheet_rows, link_type_name, source_ref, target_ref)
+            _add_entry_link_to_rows(
+                spreadsheet_rows, link_type_name, source_ref, target_ref,
+                dataplex_service=dataplex_service, user_project=user_project
+            )
     
     if redacted_link_count > 0:
         logger.info(f"Skipped {redacted_link_count} redacted entrylink(s) during export")
@@ -291,30 +299,77 @@ def _add_entry_link_to_rows(
     rows: List[List[str]], 
     link_type: str, 
     source_ref: Dict[str, Any], 
-    target_ref: Dict[str, Any]
+    target_ref: Dict[str, Any],
+    dataplex_service=None,
+    user_project: str = ""
 ) -> None:
-    """Add a single entry link as a row to the spreadsheet data."""
+    """Add a single entry link as a row to the spreadsheet data [type, source, column, target]."""
+    from utils import api_layer, business_glossary_utils
+
+    source_raw = source_ref.get('name', '')
+    target_raw = target_ref.get('name', '')
+    path_raw = source_ref.get('path', '')
+
+    if dataplex_service:
+        if link_type == "definition":
+            source_val = api_layer.get_entry_fqn(dataplex_service, source_raw, user_project)
+            column_val = business_glossary_utils.extract_column_from_source_path(path_raw)
+            target_val = api_layer.resolve_term_entry_to_display_identifier(dataplex_service, target_raw)
+        else:
+            source_val = api_layer.resolve_term_entry_to_display_identifier(dataplex_service, source_raw)
+            column_val = ""
+            target_val = api_layer.resolve_term_entry_to_display_identifier(dataplex_service, target_raw)
+    else:
+        source_val = source_raw
+        column_val = business_glossary_utils.extract_column_from_source_path(path_raw)
+        target_val = target_raw
+
     entry_link_row = [
         link_type,
-        source_ref.get('name', ''),
-        target_ref.get('name', ''),
-        source_ref.get('path', '')
+        source_val,
+        column_val,
+        target_val
     ]
     rows.append(entry_link_row)
 
 
+def _find_header_index(headers: List[str], candidates: List[str]) -> int:
+    """Find the index of the first matching candidate in headers, or -1."""
+    for candidate in candidates:
+        if candidate in headers:
+            return headers.index(candidate)
+    return -1
+
+
 def extract_column_indices(spreadsheet_data: List[List[str]]) -> Tuple[int, int, int, int]:
-    """Extract column indices from spreadsheet headers."""
+    """Extract column indices from spreadsheet headers (supporting new and legacy headers).
+    
+    Returns:
+        (type_column_idx, source_column_idx, target_column_idx, path_column_idx)
+    """
+    if not spreadsheet_data or not spreadsheet_data[0]:
+        raise ValueError("Spreadsheet header row is empty.")
+    
     normalized_headers = [header.lower().strip() for header in spreadsheet_data[0]]
-    try:
-        type_column_idx = normalized_headers.index('entry_link_type')
-        source_column_idx = normalized_headers.index('source_entry')
-        target_column_idx = normalized_headers.index('target_entry')
-        path_column_idx = normalized_headers.index('source_path') if 'source_path' in normalized_headers else -1
-    except ValueError as column_error:
-        logger.error(f"Required column not found in spreadsheet: {column_error}")
-        raise ValueError(f"Spreadsheet must have required columns: {column_error}")
-    return type_column_idx, source_column_idx, target_column_idx, path_column_idx
+
+    type_col = _find_header_index(normalized_headers, ['entry link type', 'entry_link_type', 'link_type', 'type'])
+    if type_col < 0:
+        logger.error(f"Required column 'Entry link type' not found in headers: {spreadsheet_data[0]}")
+        raise ValueError("Required column 'Entry link type' (or 'entry_link_type') not found in spreadsheet.")
+
+    source_col = _find_header_index(normalized_headers, ['source', 'source_entry', 'sourceentry'])
+    if source_col < 0:
+        logger.error(f"Required column 'Source' not found in headers: {spreadsheet_data[0]}")
+        raise ValueError("Required column 'Source' (or 'source_entry') not found in spreadsheet.")
+
+    target_col = _find_header_index(normalized_headers, ['target', 'target_entry', 'targetentry'])
+    if target_col < 0:
+        logger.error(f"Required column 'Target' not found in headers: {spreadsheet_data[0]}")
+        raise ValueError("Required column 'Target' (or 'target_entry') not found in spreadsheet.")
+
+    path_col = _find_header_index(normalized_headers, ['column', 'source_path', 'sourcepath', 'path'])
+
+    return type_col, source_col, target_col, path_col
 
 
 def _is_row_valid(data_row: List[str], row_number: int, required_max_idx: int) -> bool:
@@ -339,6 +394,9 @@ def _create_entry_link_dict(
     
     return {
         'entry_link_type': data_row[type_idx].strip(),
+        'source': data_row[source_idx].strip(),
+        'target': data_row[target_idx].strip(),
+        'column': source_path,
         'source_entry': data_row[source_idx].strip(),
         'target_entry': data_row[target_idx].strip(),
         'source_path': source_path
@@ -362,10 +420,11 @@ def rows_to_entry_link_dicts(
         
         entry_link_dict = _create_entry_link_dict(data_row, type_idx, source_idx, target_idx, path_idx)
         
-        if not entry_link_dict['source_entry'] or not entry_link_dict['target_entry']:
+        if not entry_link_dict['source'] or not entry_link_dict['target']:
             logger.warning(f"Row {row_number} missing source or target entry, skipping")
             continue
         
         entry_link_dicts.append(entry_link_dict)
     
     return entry_link_dicts
+

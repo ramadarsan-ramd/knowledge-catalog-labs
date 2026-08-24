@@ -351,12 +351,12 @@ class TestEntryLinksToRows:
     """Test entry_links_to_rows function"""
     
     def test_converts_links_to_rows(self):
-        """Convert entry links to row format"""
+        """Convert entry links to row format [type, source, column, target]"""
         entry_links = [
             {
                 'entryLinkType': 'projects/dataplex-types/locations/global/entryLinkTypes/definition',
                 'entryReferences': [
-                    {'type': 'SOURCE', 'name': 'source_entry', 'path': '/path'},
+                    {'type': 'SOURCE', 'name': 'source_entry', 'path': 'Schema.order_id'},
                     {'type': 'TARGET', 'name': 'target_entry'}
                 ]
             }
@@ -367,7 +367,33 @@ class TestEntryLinksToRows:
         assert len(result) == 1
         assert result[0][0] == 'definition'
         assert result[0][1] == 'source_entry'
-        assert result[0][2] == 'target_entry'
+        assert result[0][2] == 'order_id'
+        assert result[0][3] == 'target_entry'
+
+    def test_converts_links_with_dataplex_service(self, monkeypatch):
+        """Convert entry links with FQN and display name resolution"""
+        from utils import api_layer
+        mock_service = Mock()
+        monkeypatch.setattr(api_layer, 'get_entry_fqn', lambda s, entry, p: 'bigquery:proj.ds.tbl')
+        monkeypatch.setattr(
+            api_layer, 'resolve_term_entry_to_display_identifier',
+            lambda s, entry: 'proj.global.Sales.Order ID'
+        )
+
+        entry_links = [
+            {
+                'entryLinkType': 'projects/dataplex-types/locations/global/entryLinkTypes/definition',
+                'entryReferences': [
+                    {'type': 'SOURCE', 'name': 'projects/p/locations/us/entryGroups/@bigquery/entries/e1', 'path': 'Schema.user_id'},
+                    {'type': 'TARGET', 'name': 'projects/p/locations/global/entryGroups/@dataplex/entries/.../terms/t1'}
+                ]
+            }
+        ]
+
+        result = sheet_utils.entry_links_to_rows(entry_links, dataplex_service=mock_service, user_project='user-proj')
+
+        assert len(result) == 1
+        assert result[0] == ['definition', 'bigquery:proj.ds.tbl', 'user_id', 'proj.global.Sales.Order ID']
     
     def test_skips_invalid_link_type(self):
         """Skip entry links with invalid link type"""
@@ -414,14 +440,17 @@ class TestRowsToEntryLinkDicts:
     def test_converts_rows_to_dicts(self):
         """Convert rows to entry link dicts"""
         rows = [
-            ['entry_link_type', 'source_entry', 'target_entry', 'source_path'],  # Header
-            ['definition', 'src1', 'tgt1', '/path1']
+            ['Entry link type', 'Source', 'Target', 'Column'],  # Header
+            ['definition', 'src1', 'tgt1', 'order_id']
         ]
         
         result = sheet_utils.rows_to_entry_link_dicts(rows, 0, 1, 2, 3)
         
         assert len(result) == 1
         assert result[0]['entry_link_type'] == 'definition'
+        assert result[0]['source'] == 'src1'
+        assert result[0]['target'] == 'tgt1'
+        assert result[0]['column'] == 'order_id'
         assert result[0]['source_entry'] == 'src1'
     
     def test_skips_rows_missing_source_or_target(self):
@@ -453,8 +482,21 @@ class TestRowsToEntryLinkDicts:
 class TestExtractColumnIndices:
     """Test extract_column_indices function"""
     
-    def test_extracts_indices(self):
-        """Extract column indices from headers"""
+    def test_extracts_new_header_indices(self):
+        """Extract column indices from new human-readable headers"""
+        data = [
+            ['Entry link type', 'Source', 'Target', 'Column']
+        ]
+        
+        type_idx, source_idx, target_idx, path_idx = sheet_utils.extract_column_indices(data)
+        
+        assert type_idx == 0
+        assert source_idx == 1
+        assert target_idx == 2
+        assert path_idx == 3
+
+    def test_extracts_legacy_header_indices(self):
+        """Extract column indices from legacy snake_case headers"""
         data = [
             ['entry_link_type', 'source_entry', 'target_entry', 'source_path']
         ]
@@ -467,9 +509,9 @@ class TestExtractColumnIndices:
         assert path_idx == 3
     
     def test_handles_missing_path_column(self):
-        """Handle missing source_path column"""
+        """Handle missing column/source_path column"""
         data = [
-            ['entry_link_type', 'source_entry', 'target_entry']
+            ['Entry link type', 'Source', 'Target']
         ]
         
         type_idx, source_idx, target_idx, path_idx = sheet_utils.extract_column_indices(data)
@@ -480,11 +522,12 @@ class TestExtractColumnIndices:
     def test_raises_on_missing_required_column(self):
         """Raise ValueError for missing required column"""
         data = [
-            ['entry_link_type', 'source_entry']  # Missing target_entry
+            ['Entry link type', 'Source']  # Missing Target
         ]
         
         with pytest.raises(ValueError):
             sheet_utils.extract_column_indices(data)
+
 
 
 # ============================================================================

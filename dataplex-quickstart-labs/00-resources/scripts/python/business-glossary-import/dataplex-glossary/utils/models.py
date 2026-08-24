@@ -66,19 +66,69 @@ class EntryLink:
 
 
 @dataclass
+class ParsedTermIdentifier:
+    """Represents a parsed human-readable term identifier."""
+    project_id: str
+    location: str
+    glossary_display_name: str
+    term_display_name: str
+
+
+@dataclass
 class SpreadsheetRow:
     """Represents a row from the EntryLink import spreadsheet."""
-    entry_link_type: str
-    source_entry: str
-    target_entry: str
-    source_path: str = ""
-    
+    entry_link_type: str = ""
+    source: str = ""
+    target: str = ""
+    column: str = ""
+
+    def __init__(
+        self,
+        entry_link_type: str = "",
+        source: str = "",
+        target: str = "",
+        column: str = "",
+        source_entry: Optional[str] = None,
+        target_entry: Optional[str] = None,
+        source_path: Optional[str] = None,
+    ):
+        self.entry_link_type = entry_link_type
+        self.source = source_entry if source_entry is not None else source
+        self.target = target_entry if target_entry is not None else target
+        self.column = source_path if source_path is not None else column
+
+    @property
+    def source_entry(self) -> str:
+        return self.source
+
+    @property
+    def target_entry(self) -> str:
+        return self.target
+
+    @property
+    def source_path(self) -> str:
+        return self.column
+
     @classmethod
     def from_dict(cls, data: Dict[str, str]) -> 'SpreadsheetRow':
-        """Create a SpreadsheetRow from a dictionary."""
+        """Create a SpreadsheetRow from a dictionary supporting new and legacy keys."""
+        link_type = (
+            data.get('entry_link_type') or data.get('Entry link type') or data.get('entryLinkType', '')
+        ).strip()
+        source = (
+            data.get('source') or data.get('Source') or data.get('source_entry') or data.get('sourceEntry', '')
+        ).strip()
+        target = (
+            data.get('target') or data.get('Target') or data.get('target_entry') or data.get('targetEntry', '')
+        ).strip()
+        column = (
+            data.get('column') or data.get('Column') or data.get('source_path') or data.get('sourcePath', '')
+        ).strip()
         return cls(
-            entry_link_type=data.get('entry_link_type', ''),
-            source_entry=data.get('source_entry', ''),
-            target_entry=data.get('target_entry', ''),
-            source_path=data.get('source_path', '')
+            entry_link_type=link_type,
+            source=source,
+            target=target,
+            column=column
         )
+
+

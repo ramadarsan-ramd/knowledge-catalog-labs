@@ -104,12 +104,11 @@ def check_and_clean_archive_folder(archive_dir: str) -> bool:
 def _find_column_indices_for_entries(header_row: List[str]) -> tuple:
     """Find column indices for source and target entry columns."""
     normalized_headers = [header.lower().strip() for header in header_row]
-    try:
-        source_column_idx = normalized_headers.index('source_entry')
-        target_column_idx = normalized_headers.index('target_entry')
-        return source_column_idx, target_column_idx
-    except ValueError:
-        raise ValueError("Spreadsheet must have 'source_entry' and 'target_entry' columns")
+    source_column_idx = sheet_utils._find_header_index(normalized_headers, ['source', 'source_entry', 'sourceentry'])
+    target_column_idx = sheet_utils._find_header_index(normalized_headers, ['target', 'target_entry', 'targetentry'])
+    if source_column_idx < 0 or target_column_idx < 0:
+        raise ValueError("Spreadsheet must have 'Source' (or 'source_entry') and 'Target' (or 'target_entry') columns")
+    return source_column_idx, target_column_idx
 
 
 def _extract_entry_from_row(data_row: List[str], column_idx: int) -> str:
@@ -216,7 +215,12 @@ def check_entry_existence(entrylinks: List[EntryLink]) -> tuple:
     return missing_entry_names, failed_entry_names
 
 
-def convert_spreadsheet_to_entrylinks(spreadsheet_url: str, sheet_name: str = None) -> List[EntryLink]:
+def convert_spreadsheet_to_entrylinks(
+    spreadsheet_url: str, 
+    sheet_name: str = None, 
+    dataplex_service=None, 
+    user_project: str = ""
+) -> List[EntryLink]:
     """Convert spreadsheet rows to EntryLink entries."""
     spreadsheet_data = sheet_utils.read_from_spreadsheet_url(spreadsheet_url, sheet_name=sheet_name)
     
@@ -226,7 +230,14 @@ def convert_spreadsheet_to_entrylinks(spreadsheet_url: str, sheet_name: str = No
     type_idx, source_idx, target_idx, path_idx = sheet_utils.extract_column_indices(spreadsheet_data)
     row_dicts = sheet_utils.rows_to_entry_link_dicts(spreadsheet_data, type_idx, source_idx, target_idx, path_idx)
     
-    entrylinks = [build_entry_link(SpreadsheetRow.from_dict(row_dict)) for row_dict in row_dicts]
+    entrylinks = [
+        build_entry_link(
+            SpreadsheetRow.from_dict(row_dict), 
+            dataplex_service=dataplex_service, 
+            user_project=user_project
+        ) 
+        for row_dict in row_dicts
+    ]
     return [entrylink for entrylink in entrylinks if entrylink is not None]
 
 
@@ -251,9 +262,48 @@ def _generate_entrylink_name(project_id: str, location: str, entry_group: str) -
     return f"{entrylink_base}/entryLinks/{entrylink_id}"
 
 
-def build_entry_link(spreadsheet_row: SpreadsheetRow) -> EntryLink | None:
-    """Build EntryLink model from spreadsheet row data. Returns None if link type is invalid."""
-    project_id, location, entry_group = _parse_source_entry_components(spreadsheet_row.source_entry)
+def _resolve_source_entry_name(
+    source_str: str, 
+    link_type: str, 
+    dataplex_service=None, 
+    user_project: str = ""
+) -> str:
+    """Resolve source string (FQN, term identifier, or full entry name) to Dataplex entry name."""
+    source_str = source_str.strip()
+    if source_str.startswith('projects/'):
+        return source_str
+    
+    if link_type == DP_LINK_TYPE_DEFINITION:
+        if dataplex_service:
+            return api_layer.lookup_entry_by_fqn(dataplex_service, source_str, user_project)
+        raise ValueError(f"Cannot resolve FQN '{source_str}' without Dataplex service")
+    else:
+        if dataplex_service:
+            return api_layer.lookup_term_by_display_identifier(dataplex_service, source_str, user_project)
+        raise ValueError(f"Cannot resolve term identifier '{source_str}' without Dataplex service")
+
+
+def _resolve_target_entry_name(
+    target_str: str, 
+    dataplex_service=None, 
+    user_project: str = ""
+) -> str:
+    """Resolve target string (term identifier or full entry name) to Dataplex entry name."""
+    target_str = target_str.strip()
+    if target_str.startswith('projects/'):
+        return target_str
+    
+    if dataplex_service:
+        return api_layer.lookup_term_by_display_identifier(dataplex_service, target_str, user_project)
+    raise ValueError(f"Cannot resolve term identifier '{target_str}' without Dataplex service")
+
+
+def build_entry_link(
+    spreadsheet_row: SpreadsheetRow, 
+    dataplex_service=None, 
+    user_project: str = ""
+) -> EntryLink | None:
+    """Build EntryLink model from spreadsheet row data. Returns None if link type is invalid or resolution fails."""
     link_type = spreadsheet_row.entry_link_type.lower()
     
     if link_type not in constants.LINK_TYPES:
@@ -261,7 +311,24 @@ def build_entry_link(spreadsheet_row: SpreadsheetRow) -> EntryLink | None:
                       f"Expected one of: {list(constants.LINK_TYPES.keys())}. Row skipped.")
         return None
     
-    entry_refs = build_entry_references(spreadsheet_row, entry_group, link_type)
+    source_val = spreadsheet_row.source or spreadsheet_row.source_entry
+    target_val = spreadsheet_row.target or spreadsheet_row.target_entry
+    column_val = spreadsheet_row.column or spreadsheet_row.source_path
+    
+    try:
+        source_entry = _resolve_source_entry_name(source_val, link_type, dataplex_service, user_project)
+        target_entry = _resolve_target_entry_name(target_val, dataplex_service, user_project)
+    except Exception as resolve_error:
+        logger.error(f"Resolution failed for row: {resolve_error}")
+        return None
+
+    try:
+        project_id, location, entry_group = _parse_source_entry_components(source_entry)
+    except Exception as parse_error:
+        logger.error(f"Failed to parse source entry components from '{source_entry}': {parse_error}")
+        return None
+    
+    entry_refs = build_entry_references(source_entry, target_entry, column_val, entry_group, link_type)
     entrylink_name = _generate_entrylink_name(project_id, location, entry_group)
     
     entrylink = EntryLink(
@@ -273,41 +340,75 @@ def build_entry_link(spreadsheet_row: SpreadsheetRow) -> EntryLink | None:
     logger.debug(f"input row: {spreadsheet_row}, output entrylink: {entrylink}")
     return entrylink
 
+
 def _format_source_path_for_bigquery(source_path: str, entry_group: str) -> str:
     """Format source path for BigQuery entries."""
-    if entry_group == BIGQUERY_SYSTEM_ENTRY_GROUP and source_path and not source_path.startswith('Schema.'):
-        return f"Schema.{source_path}"
-    return source_path
+    column_clean = business_glossary_utils.extract_column_from_source_path(source_path) if source_path else ""
+    return business_glossary_utils.format_source_path_from_column(column_clean, entry_group)
 
 
-def _build_definition_references(spreadsheet_row: SpreadsheetRow, entry_group: str) -> List[EntryReference]:
+def _build_definition_references(
+    source_entry_or_row, 
+    target_entry_or_entry_group: str = "", 
+    column_name: str = "", 
+    entry_group: str = ""
+) -> List[EntryReference]:
     """Build entry references for definition link type."""
-    source_path = spreadsheet_row.source_path.strip()
-    formatted_path = _format_source_path_for_bigquery(source_path, entry_group)
+    if isinstance(source_entry_or_row, SpreadsheetRow):
+        row = source_entry_or_row
+        entry_group = target_entry_or_entry_group
+        source_entry = row.source or row.source_entry
+        target_entry = row.target or row.target_entry
+        column_name = row.column or row.source_path
+    else:
+        source_entry = source_entry_or_row
+        target_entry = target_entry_or_entry_group
+    
+    formatted_path = _format_source_path_for_bigquery(column_name, entry_group)
     
     return [
         EntryReference(
-            name=spreadsheet_row.source_entry,
+            name=source_entry,
             path=formatted_path,
             type=ENTRY_REFERENCE_TYPE_SOURCE
         ),
         EntryReference(
-            name=spreadsheet_row.target_entry,
+            name=target_entry,
             path='',
             type=ENTRY_REFERENCE_TYPE_TARGET
         )
     ]
 
 
-def build_entry_references(spreadsheet_row: SpreadsheetRow, entry_group: str, link_type: str) -> List[EntryReference]:
-    """Build list of EntryReference models from row data."""
+def build_entry_references(
+    source_entry_or_row, 
+    target_entry_or_entry_group: str = "", 
+    column_name_or_link_type: str = "", 
+    entry_group: str = "", 
+    link_type: str = ""
+) -> List[EntryReference]:
+    """Build list of EntryReference models from row data or entry names."""
+    if isinstance(source_entry_or_row, SpreadsheetRow):
+        row = source_entry_or_row
+        entry_group = target_entry_or_entry_group
+        link_type = column_name_or_link_type
+        source_entry = row.source or row.source_entry
+        target_entry = row.target or row.target_entry
+        column_name = row.column or row.source_path
+    else:
+        source_entry = source_entry_or_row
+        target_entry = target_entry_or_entry_group
+        column_name = column_name_or_link_type
+
     if link_type == DP_LINK_TYPE_DEFINITION:
-        return _build_definition_references(spreadsheet_row, entry_group)
+        return _build_definition_references(source_entry, target_entry, column_name, entry_group)
     
     return [
-        EntryReference(name=spreadsheet_row.source_entry),
-        EntryReference(name=spreadsheet_row.target_entry)
+        EntryReference(name=source_entry),
+        EntryReference(name=target_entry)
     ]
+
+
 
 
 def extract_entrylink_components(entrylink_name: str) -> tuple[str, str, str]:
@@ -477,7 +578,12 @@ def _run_import_workflow(parsed_args) -> int:
     if not check_and_clean_archive_folder(_get_archive_directory()):
         return 1
     
-    entrylinks = convert_spreadsheet_to_entrylinks(parsed_args.spreadsheet_url, sheet_name=sheet_name)
+    entrylinks = convert_spreadsheet_to_entrylinks(
+        parsed_args.spreadsheet_url, 
+        sheet_name=sheet_name, 
+        dataplex_service=dataplex_service, 
+        user_project=user_project
+    )
     if not entrylinks:
         logger.warning("Spreadsheet is empty or has no valid entries")
         return 1

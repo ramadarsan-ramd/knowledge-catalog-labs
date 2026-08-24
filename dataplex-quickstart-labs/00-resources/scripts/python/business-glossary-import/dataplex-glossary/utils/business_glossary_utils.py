@@ -108,3 +108,123 @@ def generate_entry_link_id() -> str:
     """
     entrylink_id = 'g' + uuid.uuid4().hex
     return entrylink_id
+
+
+def format_term_display_identifier(
+    project_id: str, location: str, glossary_display_name: str, term_display_name: str, delimiter: str = "."
+) -> str:
+    """Format a human-readable term identifier string.
+
+    Example:
+        >>> format_term_display_identifier("my-proj", "global", "Sales Glossary", "Revenue")
+        'my-proj.global.Sales Glossary.Revenue'
+    """
+    return f"{project_id.strip()}{delimiter}{location.strip()}{delimiter}{glossary_display_name.strip()}{delimiter}{term_display_name.strip()}"
+
+
+def parse_term_display_identifier(identifier: str, delimiter: str = ".") -> 'ParsedTermIdentifier':
+    """Parse a human-readable term identifier string into a ParsedTermIdentifier.
+
+    Expected format: '<project>.<location>.<glossaryDisplayName>.<termDisplayName>'
+    (or slash-delimited if delimiter='/').
+
+    Args:
+        identifier: The term display identifier string.
+        delimiter: Delimiter character (default '.').
+
+    Returns:
+        ParsedTermIdentifier containing project_id, location, glossary_display_name, and term_display_name.
+
+    Raises:
+        InvalidTermIdentifierError: If the identifier has fewer than 4 segments or empty components.
+    """
+    from utils.error import InvalidTermIdentifierError
+    from utils.models import ParsedTermIdentifier
+
+    if not identifier or not isinstance(identifier, str):
+        raise InvalidTermIdentifierError(f"Invalid term identifier: '{identifier}'. Identifier must be a non-empty string.")
+
+    cleaned = identifier.strip()
+    parts = cleaned.split(delimiter)
+    if len(parts) < 4:
+        raise InvalidTermIdentifierError(
+            f"Invalid term identifier '{cleaned}'. Expected format: "
+            f"'<project>{delimiter}<location>{delimiter}<glossaryDisplayName>{delimiter}<termDisplayName>'"
+        )
+
+    project_id = parts[0].strip()
+    location_id = parts[1].strip()
+    glossary_display_name = parts[2].strip()
+    term_display_name = delimiter.join(parts[3:]).strip()
+
+    if not project_id or not location_id or not glossary_display_name or not term_display_name:
+        raise InvalidTermIdentifierError(
+            f"Invalid term identifier '{cleaned}'. All components (project, location, glossary, term) must be non-empty."
+        )
+
+    return ParsedTermIdentifier(
+        project_id=project_id,
+        location=location_id,
+        glossary_display_name=glossary_display_name,
+        term_display_name=term_display_name,
+    )
+
+
+def extract_term_resource_from_entry_name(entry_name: str) -> str:
+    """Extract the underlying glossary term resource name from a Dataplex term entry name.
+
+    Example:
+        >>> extract_term_resource_from_entry_name(
+        ...     'projects/p/locations/l/entryGroups/@dataplex/entries/projects/p/locations/l/glossaries/g/terms/t'
+        ... )
+        'projects/p/locations/l/glossaries/g/terms/t'
+    """
+    pattern = re.compile(
+        r"projects/(?P<project_id>[^/]+)/locations/(?P<location_id>[^/]+)/entryGroups/@dataplex/entries/"
+        r"(?P<term_resource>projects/[^/]+/locations/[^/]+/glossaries/[^/]+/terms/[^/]+)"
+    )
+    match = pattern.match(entry_name)
+    if match:
+        return match.group("term_resource")
+    # If it's already a term resource name
+    if TERM_NAME_PATTERN.match(entry_name):
+        return entry_name
+    raise InvalidTermNameError(f"Could not extract term resource from entry name: {entry_name}")
+
+
+def extract_column_from_source_path(source_path: str) -> str:
+    """Extract the clean column name from a source path (stripping 'Schema.' prefix).
+
+    Example:
+        >>> extract_column_from_source_path("Schema.order_id")
+        'order_id'
+        >>> extract_column_from_source_path("")
+        ''
+    """
+    if not source_path:
+        return ""
+    cleaned = source_path.strip()
+    if cleaned.startswith("Schema."):
+        return cleaned[len("Schema."):]
+    return cleaned
+
+
+def format_source_path_from_column(column: str, entry_group: str = "") -> str:
+    """Format a column name into a Dataplex source path (prepending 'Schema.' for BigQuery).
+
+    Example:
+        >>> format_source_path_from_column("order_id", "@bigquery")
+        'Schema.order_id'
+        >>> format_source_path_from_column("", "@bigquery")
+        ''
+    """
+    if not column:
+        return ""
+    cleaned = column.strip()
+    if not cleaned:
+        return ""
+    # Prepend Schema. if entry_group is BigQuery and Schema. is not already present
+    if (entry_group == "@bigquery" or entry_group.endswith("bigquery")) and not cleaned.startswith("Schema."):
+        return f"Schema.{cleaned}"
+    return cleaned
+

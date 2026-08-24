@@ -157,13 +157,18 @@ python3 entrylinks-export.py \
 
 ### Sheets file schema (EntryLinks)
 
-The first row of the sheet contains the following header:
+The first row of the sheet contains the following headers:
 
-`entry_link_type, source_entry, target_entry, source_path`
+`Entry link type, Source, Column, Target`
 
 Where:
 
-*   `entry_link_type` (required): Type of EntryLink. Valid values: `definition`, `synonym`, `related`.
-*   `source_entry` (required): Full Dataplex entry resource path for the source (e.g. `projects/my-project/locations/us/entryGroups/@bigquery/entries/my-entry`).
-*   `target_entry` (required): Full Dataplex entry resource path for the target.
-*   `source_path` (optional): Path within the source entry (e.g. a BigQuery column path like `Schema.Field1`). Populated for definition entrylinks.
+*   `Entry link type` (required): Type of EntryLink. Valid values: `definition`, `synonym`, `related`.
+*   `Source` (required):
+    *   For `definition` links: Fully Qualified Name (FQN) of the data asset entry (e.g., `bigquery:project_id.dataset_id.table_name`).
+    *   For `synonym` and `related` links: The 4-part term display identifier in format `<project>.<location>.<glossaryDisplayName>.<termDisplayName>`.
+*   `Column` (optional):
+    *   For `definition` links: Specific column/field name within the data asset (e.g., `order_id` or `user.address.zip`). Leave empty for whole-table/entry definitions.
+    *   For `synonym` and `related` links: Always left empty.
+*   `Target` (required): The 4-part term display identifier in format `<project>.<location>.<glossaryDisplayName>.<termDisplayName>`.
+

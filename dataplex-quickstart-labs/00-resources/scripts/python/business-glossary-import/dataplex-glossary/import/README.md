@@ -50,10 +50,10 @@ Share the Google Sheet with the service account (`SA_EMAIL`) as a **Viewer** so 
 *   **Glossary Import**: The sheet should contain the following header row:
     `id, parent, display_name, description, overview, type, contact1_email, contact1_name, contact2_email, contact2_name, label1_key, label1_value, label2_key, label2_value`
 *   **EntryLinks Import**: The sheet should contain the following columns in the header row:
-    *   `entry_link_type` - Type of link: `definition`, `related`, or `synonym`
-    *   `source_entry` - Full entry name of the source (e.g., `projects/PROJECT/locations/LOCATION/entryGroups/ENTRY_GROUP/entries/ENTRY_ID`)
-    *   `target_entry` - Full entry name of the target
-    *   `source_path` - (Optional) Column/field path for definition links (e.g., `Schema.column_name`)
+    *   `Entry link type` (or `entry_link_type`) - Type of link: `definition`, `related`, or `synonym`
+    *   `Source` (or `source_entry`) - For `definition` links, the data asset FQN (e.g., `bigquery:project.dataset.table`). For `synonym`/`related` links, the 4-part term display identifier `<project>.<location>.<glossaryDisplayName>.<termDisplayName>`. Full Dataplex entry resource names are also accepted for backward compatibility.
+    *   `Column` (or `source_path`) - (Optional) Specific column/field name (e.g., `order_id` or `Schema.order_id`). Leave empty for table-level definitions and synonym/related links.
+    *   `Target` (or `target_entry`) - The 4-part term display identifier `<project>.<location>.<glossaryDisplayName>.<termDisplayName>`. Full Dataplex entry resource names are also accepted for backward compatibility.
 
 ### Authentication
 
@@ -144,13 +144,18 @@ python3 entrylinks-import.py \
 
 ### Sheets file schema (EntryLinks)
 
-The first row of the sheet should contain the following header:
+The first row of the sheet should contain the following headers:
 
-`entry_link_type, source_entry, target_entry, source_path`
+`Entry link type, Source, Column, Target`
 
 Where:
 
-*   `entry_link_type` (required): Type of EntryLink. Valid values: `definition`, `synonym`, `related`.
-*   `source_entry` (required): Full Dataplex entry resource path for the source (e.g. `projects/my-project/locations/us/entryGroups/@bigquery/entries/my-entry`).
-*   `target_entry` (required): Full Dataplex entry resource path for the target.
-*   `source_path` (optional): Path within the source entry (e.g. a BigQuery column path like `Schema.Field1`). Used for definition entrylinks.
+*   `Entry link type` (required): Type of EntryLink. Valid values: `definition`, `synonym`, `related`.
+*   `Source` (required):
+    *   For `definition` links: Fully Qualified Name (FQN) of the data asset entry (e.g., `bigquery:project_id.dataset_id.table_name`). Full Dataplex entry resource names are also accepted.
+    *   For `synonym` and `related` links: The 4-part term display identifier in format `<project>.<location>.<glossaryDisplayName>.<termDisplayName>`. Full Dataplex entry resource names are also accepted.
+*   `Column` (optional):
+    *   For `definition` links: Specific column/field name within the data asset (e.g., `order_id` or `user.address.zip`). Leave empty for whole-table/entry definitions.
+    *   For `synonym` and `related` links: Always left empty.
+*   `Target` (required): The 4-part term display identifier in format `<project>.<location>.<glossaryDisplayName>.<termDisplayName>`. Full Dataplex entry resource names are also accepted.
+

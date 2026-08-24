@@ -23,13 +23,35 @@ from .constants import (
     PAGE_SIZE,
     PROJECT_PATTERN,
     API_CALL_DELAY_SECONDS,
+    TERM_NAME_PATTERN,
 )
+
 from .error import *
 from .retry_utils import execute_with_retry, is_retryable_google_api_error
 
 logger = logging_utils.get_logger()
 
 _locations_cache: Dict[str, List[str]] = {}
+_glossary_cache: Dict[str, Dict] = {}
+_term_cache: Dict[str, Dict] = {}
+_project_glossaries_cache: Dict[str, List[Dict]] = {}
+_glossary_terms_map_cache: Dict[str, Dict[str, str]] = {}
+_fqn_to_entry_cache: Dict[str, Dict] = {}
+_entry_to_fqn_cache: Dict[str, str] = {}
+
+
+def clear_caches():
+    """Clear all in-memory caches (useful between batch runs and in unit tests)."""
+    global _locations_cache, _glossary_cache, _term_cache, _project_glossaries_cache
+    global _glossary_terms_map_cache, _fqn_to_entry_cache, _entry_to_fqn_cache
+    _locations_cache.clear()
+    _glossary_cache.clear()
+    _term_cache.clear()
+    _project_glossaries_cache.clear()
+    _glossary_terms_map_cache.clear()
+    _fqn_to_entry_cache.clear()
+    _entry_to_fqn_cache.clear()
+
 
 # Global throttle lock for lookupEntryLinks API calls.
 # Ensures a minimum delay of API_CALL_DELAY_SECONDS (240ms) between
@@ -282,3 +304,173 @@ def resolve_regions_to_query(location: str, user_project: str) -> List[str]:
     if location.lower() == "global":
         return [location for location in list_supported_locations(user_project) if location not in EXCLUDED_LOCATIONS]
     return [location]
+
+
+def get_glossary(dataplex_service: build, glossary_name: str) -> Dict:
+    """Fetch a glossary resource by name with in-memory caching."""
+    if glossary_name in _glossary_cache:
+        return _glossary_cache[glossary_name]
+    logger.debug(f"Request: glossaries.get(name={glossary_name})")
+    try:
+        request = dataplex_service.projects().locations().glossaries().get(name=glossary_name)
+        response = execute_with_retry(request.execute, f"Get glossary {glossary_name}")
+        _glossary_cache[glossary_name] = response
+        return response
+    except Exception as e:
+        logger.error(f"Error fetching glossary {glossary_name}: {e}")
+        raise DataplexAPIError(f"Error fetching glossary {glossary_name}: {e}")
+
+
+def get_term(dataplex_service: build, term_name: str) -> Dict:
+    """Fetch a term resource by name with in-memory caching."""
+    if term_name in _term_cache:
+        return _term_cache[term_name]
+    logger.debug(f"Request: glossaries.terms.get(name={term_name})")
+    try:
+        request = dataplex_service.projects().locations().glossaries().terms().get(name=term_name)
+        response = execute_with_retry(request.execute, f"Get term {term_name}")
+        _term_cache[term_name] = response
+        return response
+    except Exception as e:
+        logger.error(f"Error fetching term {term_name}: {e}")
+        raise DataplexAPIError(f"Error fetching term {term_name}: {e}")
+
+
+def list_glossaries(dataplex_service: build, parent: str) -> List[Dict]:
+    """Lists all glossaries under a project/location with pagination and in-memory caching."""
+    if parent in _project_glossaries_cache:
+        return _project_glossaries_cache[parent]
+
+    all_glossaries = []
+    logger.debug(f"Request: glossaries.list(parent={parent})")
+    try:
+        request = dataplex_service.projects().locations().glossaries().list(
+            parent=parent, pageSize=1000
+        )
+        while request:
+            response = execute_with_retry(request.execute, f"List glossaries for {parent}")
+            all_glossaries.extend(response.get('glossaries', []))
+            request = dataplex_service.projects().locations().glossaries().list_next(request, response)
+
+        _project_glossaries_cache[parent] = all_glossaries
+        for g in all_glossaries:
+            if g.get('name'):
+                _glossary_cache[g['name']] = g
+        return all_glossaries
+    except Exception as e:
+        logger.error(f"Error listing glossaries for {parent}: {e}")
+        raise DataplexAPIError(f"Error listing glossaries for {parent}: {e}")
+
+
+def resolve_term_entry_to_display_identifier(dataplex_service: build, term_entry_name: str) -> str:
+    """Resolves a Dataplex term entry resource name into '<project>.<location>.<glossaryDisplayName>.<termDisplayName>'."""
+    from utils import business_glossary_utils
+    term_resource_name = business_glossary_utils.extract_term_resource_from_entry_name(term_entry_name)
+
+    match = TERM_NAME_PATTERN.match(term_resource_name)
+    if not match:
+        raise InvalidTermNameError(f"Invalid term resource name: {term_resource_name}")
+
+    project_id = match.group('project_id')
+    location_id = match.group('location_id')
+    glossary_id = match.group('glossary_id')
+
+    glossary_resource_name = f"projects/{project_id}/locations/{location_id}/glossaries/{glossary_id}"
+    glossary = get_glossary(dataplex_service, glossary_resource_name)
+    term = get_term(dataplex_service, term_resource_name)
+
+    glossary_display_name = glossary.get('displayName') or glossary_id
+    term_display_name = term.get('displayName') or match.group('term_id')
+
+    return business_glossary_utils.format_term_display_identifier(
+        project_id, location_id, glossary_display_name, term_display_name
+    )
+
+
+def get_entry_fqn(dataplex_service: build, entry_resource_name: str, user_project: str) -> str:
+    """Resolve an entry resource name to its Fully Qualified Name (FQN) with caching."""
+    if entry_resource_name in _entry_to_fqn_cache:
+        return _entry_to_fqn_cache[entry_resource_name]
+
+    project_id, location_id, entry_group, entry_id = parse_entry_name(entry_resource_name)
+    parent = f"projects/{user_project}/locations/{location_id}"
+    entry_dict = lookup_entry(dataplex_service, entry_resource_name, parent)
+    if not entry_dict:
+        # Fallback to project's own location
+        entry_dict = lookup_entry(dataplex_service, entry_resource_name, f"projects/{project_id}/locations/{location_id}")
+
+    fqn = entry_dict.get("fullyQualifiedName") if entry_dict else None
+    if not fqn:
+        logger.warning(f"Could not retrieve fullyQualifiedName for entry {entry_resource_name}, falling back to entry name.")
+        fqn = entry_resource_name
+
+    _entry_to_fqn_cache[entry_resource_name] = fqn
+    return fqn
+
+
+def lookup_term_by_display_identifier(dataplex_service: build, identifier: str) -> str:
+    """Resolves a human-readable term identifier to a Dataplex term entry resource name."""
+    from utils import business_glossary_utils
+    parsed = business_glossary_utils.parse_term_display_identifier(identifier)
+    parent_loc = f"projects/{parsed.project_id}/locations/{parsed.location}"
+
+    glossaries = list_glossaries(dataplex_service, parent_loc)
+    matched_glossary = None
+    for g in glossaries:
+        if (g.get('displayName') or '').strip().lower() == parsed.glossary_display_name.lower():
+            matched_glossary = g
+            break
+        # Also check if user passed glossary ID
+        glossary_id = g.get('name', '').split('/')[-1]
+        if glossary_id.lower() == parsed.glossary_display_name.lower():
+            matched_glossary = g
+            break
+
+    if not matched_glossary:
+        raise GlossaryNotFoundError(
+            f"Glossary '{parsed.glossary_display_name}' not found in project '{parsed.project_id}' location '{parsed.location}'"
+        )
+
+    glossary_name = matched_glossary['name']
+
+    # Load terms for glossary (cached)
+    if glossary_name not in _glossary_terms_map_cache:
+        terms = list_glossary_terms(dataplex_service, glossary_name)
+        terms_map = {}
+        for t in terms:
+            t_name = t.get('name', '')
+            t_display = (t.get('displayName') or '').strip().lower()
+            t_id = t_name.split('/')[-1].lower()
+            if t_display:
+                terms_map[t_display] = t_name
+            if t_id:
+                terms_map[t_id] = t_name
+        _glossary_terms_map_cache[glossary_name] = terms_map
+
+    terms_map = _glossary_terms_map_cache[glossary_name]
+    target_term_key = parsed.term_display_name.strip().lower()
+    if target_term_key not in terms_map:
+        raise TermNotFoundError(
+            f"Term '{parsed.term_display_name}' not found in glossary '{parsed.glossary_display_name}' ({glossary_name})"
+        )
+
+    term_resource_name = terms_map[target_term_key]
+    return business_glossary_utils.generate_entry_name_from_term_name(term_resource_name)
+
+
+def lookup_entry_by_fqn(
+    dataplex_service: build, fqn: str, user_project: str, location: str = "global"
+) -> Dict:
+    """Looks up a Dataplex entry by its Fully Qualified Name (FQN) with caching."""
+    if fqn in _fqn_to_entry_cache:
+        return _fqn_to_entry_cache[fqn]
+
+    parent = f"projects/{user_project}/locations/{location}"
+    entry_dict = lookup_entry(dataplex_service, entry_name=fqn, project_location_name=parent)
+    if not entry_dict:
+        raise EntryFQNNotFoundError(f"Entry with FQN '{fqn}' not found in Dataplex under project '{user_project}'")
+
+    _fqn_to_entry_cache[fqn] = entry_dict
+    if entry_dict.get('name') and entry_dict.get('fullyQualifiedName'):
+        _entry_to_fqn_cache[entry_dict['name']] = entry_dict['fullyQualifiedName']
+    return entry_dict

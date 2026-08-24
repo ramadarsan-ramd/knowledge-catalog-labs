@@ -40,3 +40,20 @@ class InvalidCategoryNameError(Exception):
 class InvalidEntryIdFormatError(Exception):
     """Raised when the entry ID format is invalid."""
     pass
+
+class InvalidTermIdentifierError(Exception):
+    """Raised when a human-readable term identifier format is invalid."""
+    pass
+
+class TermNotFoundError(Exception):
+    """Raised when a glossary term is not found by display name."""
+    pass
+
+class GlossaryNotFoundError(Exception):
+    """Raised when a glossary is not found by display name."""
+    pass
+
+class EntryFQNNotFoundError(Exception):
+    """Raised when a data asset entry cannot be found by its FQN."""
+    pass
+

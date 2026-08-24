@@ -309,3 +309,201 @@ class TestEndToEndFlows:
         terms = api_layer.list_glossary_terms(mock_service, 'projects/p/locations/l/glossaries/g')
         
         assert len(terms) == 1
+
+
+# ============================================================================
+# RESOLUTION & LOOKUP TESTS
+# ============================================================================
+
+class TestGetGlossaryAndTerm:
+    """Test get_glossary and get_term functions with caching."""
+
+    def setup_method(self):
+        api_layer.clear_caches()
+
+    def test_get_glossary_fetches_and_caches(self):
+        mock_service = MagicMock()
+        mock_get = mock_service.projects().locations().glossaries().get
+        mock_get().execute.return_value = {
+            'name': 'projects/p/locations/l/glossaries/g1',
+            'displayName': 'Sales Glossary'
+        }
+        mock_get.reset_mock()
+
+        glossary = api_layer.get_glossary(mock_service, 'projects/p/locations/l/glossaries/g1')
+        assert glossary['displayName'] == 'Sales Glossary'
+        # Second call should use cache
+        glossary2 = api_layer.get_glossary(mock_service, 'projects/p/locations/l/glossaries/g1')
+        assert glossary2['displayName'] == 'Sales Glossary'
+        assert mock_get.call_count == 1
+
+    def test_get_term_fetches_and_caches(self):
+        mock_service = MagicMock()
+        mock_get = mock_service.projects().locations().glossaries().terms().get
+        mock_get().execute.return_value = {
+            'name': 'projects/p/locations/l/glossaries/g1/terms/t1',
+            'displayName': 'Order Total'
+        }
+        mock_get.reset_mock()
+
+        term = api_layer.get_term(mock_service, 'projects/p/locations/l/glossaries/g1/terms/t1')
+        assert term['displayName'] == 'Order Total'
+        # Second call uses cache
+        term2 = api_layer.get_term(mock_service, 'projects/p/locations/l/glossaries/g1/terms/t1')
+        assert term2['displayName'] == 'Order Total'
+        assert mock_get.call_count == 1
+
+
+class TestListGlossaries:
+    """Test list_glossaries function."""
+
+    def setup_method(self):
+        api_layer.clear_caches()
+
+    def test_lists_and_caches_glossaries(self):
+        mock_service = MagicMock()
+        mock_list = mock_service.projects().locations().glossaries().list
+        mock_list().execute.return_value = {
+            'glossaries': [
+                {'name': 'projects/p/locations/global/glossaries/g1', 'displayName': 'Glossary 1'},
+                {'name': 'projects/p/locations/global/glossaries/g2', 'displayName': 'Glossary 2'}
+            ]
+        }
+        mock_service.projects().locations().glossaries().list_next.return_value = None
+        mock_list.reset_mock()
+
+        glossaries = api_layer.list_glossaries(mock_service, 'projects/p/locations/global')
+        assert len(glossaries) == 2
+        assert glossaries[0]['displayName'] == 'Glossary 1'
+
+        # Cached call
+        cached = api_layer.list_glossaries(mock_service, 'projects/p/locations/global')
+        assert len(cached) == 2
+        assert mock_list.call_count == 1
+
+
+
+class TestResolveTermEntryToDisplayIdentifier:
+    """Test resolve_term_entry_to_display_identifier."""
+
+    def setup_method(self):
+        api_layer.clear_caches()
+
+    def test_resolves_dataplex_entry_to_display_identifier(self):
+        mock_service = MagicMock()
+        mock_service.projects().locations().glossaries().get().execute.return_value = {
+            'name': 'projects/my-proj/locations/global/glossaries/sales_glossary',
+            'displayName': 'Sales Glossary'
+        }
+        mock_service.projects().locations().glossaries().terms().get().execute.return_value = {
+            'name': 'projects/my-proj/locations/global/glossaries/sales_glossary/terms/revenue_term',
+            'displayName': 'Revenue'
+        }
+
+        entry_name = (
+            'projects/my-proj/locations/global/entryGroups/@dataplex/entries/'
+            'projects/my-proj/locations/global/glossaries/sales_glossary/terms/revenue_term'
+        )
+        identifier = api_layer.resolve_term_entry_to_display_identifier(mock_service, entry_name)
+        assert identifier == 'my-proj.global.Sales Glossary.Revenue'
+
+
+class TestGetEntryFQN:
+    """Test get_entry_fqn function."""
+
+    def setup_method(self):
+        api_layer.clear_caches()
+
+    def test_fetches_and_caches_fqn(self, monkeypatch):
+        mock_service = MagicMock()
+        monkeypatch.setattr(
+            api_layer, 'lookup_entry',
+            lambda s, entry, parent: {'name': entry, 'fullyQualifiedName': 'bigquery:my-proj.ds.table1'}
+        )
+        entry_name = 'projects/my-proj/locations/us/entryGroups/@bigquery/entries/entry1'
+        fqn = api_layer.get_entry_fqn(mock_service, entry_name, 'user-proj')
+        assert fqn == 'bigquery:my-proj.ds.table1'
+
+        # Second call uses cache
+        fqn2 = api_layer.get_entry_fqn(mock_service, entry_name, 'user-proj')
+        assert fqn2 == 'bigquery:my-proj.ds.table1'
+
+
+class TestLookupTermByDisplayIdentifier:
+    """Test lookup_term_by_display_identifier."""
+
+    def setup_method(self):
+        api_layer.clear_caches()
+
+    def test_resolves_valid_display_identifier(self, monkeypatch):
+        mock_service = MagicMock()
+        monkeypatch.setattr(
+            api_layer, 'list_glossaries',
+            lambda s, parent: [{'name': 'projects/my-proj/locations/global/glossaries/g1', 'displayName': 'Sales Glossary'}]
+        )
+        monkeypatch.setattr(
+            api_layer, 'list_glossary_terms',
+            lambda s, glossary_name: [
+                {'name': 'projects/my-proj/locations/global/glossaries/g1/terms/t1', 'displayName': 'Order Total'}
+            ]
+        )
+
+        entry_name = api_layer.lookup_term_by_display_identifier(
+            mock_service, 'my-proj.global.Sales Glossary.Order Total'
+        )
+        expected = (
+            'projects/my-proj/locations/global/entryGroups/@dataplex/entries/'
+            'projects/my-proj/locations/global/glossaries/g1/terms/t1'
+        )
+        assert entry_name == expected
+
+    def test_raises_when_glossary_not_found(self, monkeypatch):
+        from utils.error import GlossaryNotFoundError
+        mock_service = MagicMock()
+        monkeypatch.setattr(api_layer, 'list_glossaries', lambda s, parent: [])
+
+        with pytest.raises(GlossaryNotFoundError):
+            api_layer.lookup_term_by_display_identifier(
+                mock_service, 'my-proj.global.NonExistent.Order Total'
+            )
+
+    def test_raises_when_term_not_found(self, monkeypatch):
+        from utils.error import TermNotFoundError
+        mock_service = MagicMock()
+        monkeypatch.setattr(
+            api_layer, 'list_glossaries',
+            lambda s, parent: [{'name': 'projects/my-proj/locations/global/glossaries/g1', 'displayName': 'Sales'}]
+        )
+        monkeypatch.setattr(api_layer, 'list_glossary_terms', lambda s, g: [])
+
+        with pytest.raises(TermNotFoundError):
+            api_layer.lookup_term_by_display_identifier(
+                mock_service, 'my-proj.global.Sales.MissingTerm'
+            )
+
+
+class TestLookupEntryByFQN:
+    """Test lookup_entry_by_fqn."""
+
+    def setup_method(self):
+        api_layer.clear_caches()
+
+    def test_resolves_and_caches_entry(self, monkeypatch):
+        mock_service = MagicMock()
+        mock_entry = {
+            'name': 'projects/my-proj/locations/us/entryGroups/@bigquery/entries/orders',
+            'fullyQualifiedName': 'bigquery:my-proj.ds.orders'
+        }
+        monkeypatch.setattr(api_layer, 'lookup_entry', lambda s, entry_name, project_location_name: mock_entry)
+
+        entry = api_layer.lookup_entry_by_fqn(mock_service, 'bigquery:my-proj.ds.orders', 'user-proj')
+        assert entry['name'] == 'projects/my-proj/locations/us/entryGroups/@bigquery/entries/orders'
+
+    def test_raises_when_fqn_not_found(self, monkeypatch):
+        from utils.error import EntryFQNNotFoundError
+        mock_service = MagicMock()
+        monkeypatch.setattr(api_layer, 'lookup_entry', lambda s, entry_name, project_location_name: None)
+
+        with pytest.raises(EntryFQNNotFoundError):
+            api_layer.lookup_entry_by_fqn(mock_service, 'bigquery:missing.ds.tbl', 'user-proj')
+

@@ -9,22 +9,27 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from utils import api_layer, argument_parser, business_glossary_utils, logging_utils, sheet_utils, error
-from utils.constants import MAX_WORKERS
+from utils.constants import MAX_WORKERS, ENTRYLINK_SHEET_HEADERS
 from utils.retry_utils import is_network_error
 
 logger = logging_utils.get_logger()
 
-SHEET_HEADERS = ["entry_link_type", "source_entry", "target_entry", "source_path"]
+SHEET_HEADERS = ENTRYLINK_SHEET_HEADERS
 
 
 def _build_deduplication_key(entry_link_row: list) -> tuple:
-    """Build a unique key for detecting duplicate entry links."""
-    link_type = entry_link_row[0]
-    source_entry = entry_link_row[1]
-    target_entry = entry_link_row[2]
-    source_path = entry_link_row[3] if len(entry_link_row) > 3 else ''
+    """Build a unique key for detecting duplicate entry links.
     
-    return (link_type, tuple(sorted([source_entry, target_entry])), source_path)
+    Row format: [link_type, source, column, target]
+    """
+    link_type = entry_link_row[0]
+    source = entry_link_row[1]
+    column = entry_link_row[2] if len(entry_link_row) > 2 else ''
+    target = entry_link_row[3] if len(entry_link_row) > 3 else ''
+    
+    if link_type in ("synonym", "related"):
+        return (link_type, tuple(sorted([source, target])), column)
+    return (link_type, source, target, column)
 
 
 def deduplicate_entry_links(entry_links: list) -> list:
@@ -74,8 +79,10 @@ def _fetch_links_from_regions_parallel(term_entry_name: str, regions: list, bill
     return collected_links
 
 
-def fetch_entry_links_for_term(glossary_term: dict, regions_to_query: list, billing_project: str) -> list:
-    """Fetch all entry links for a term across relevant regions."""
+def fetch_entry_links_for_term(
+    glossary_term: dict, regions_to_query: list, billing_project: str, dataplex_service=None
+) -> list:
+    """Fetch all entry links for a term across relevant regions and convert to rows."""
     term_name = glossary_term["name"]
     term_entry_name = business_glossary_utils.generate_entry_name_from_term_name(term_name)
     
@@ -83,15 +90,19 @@ def fetch_entry_links_for_term(glossary_term: dict, regions_to_query: list, bill
         return []
     
     collected_links = _fetch_links_from_regions_parallel(term_entry_name, regions_to_query, billing_project)
-    return sheet_utils.entry_links_to_rows(collected_links) if collected_links else []
+    return sheet_utils.entry_links_to_rows(
+        collected_links, dataplex_service=dataplex_service, user_project=billing_project
+    ) if collected_links else []
 
 
-def fetch_all_entry_links(glossary_terms: list, regions_to_query: list, billing_project: str) -> list:
+def fetch_all_entry_links(
+    glossary_terms: list, regions_to_query: list, billing_project: str, dataplex_service=None
+) -> list:
     """Fetch entry links for all terms in parallel."""
     all_entry_links = []
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         term_futures = {
-            executor.submit(fetch_entry_links_for_term, term, regions_to_query, billing_project): term 
+            executor.submit(fetch_entry_links_for_term, term, regions_to_query, billing_project, dataplex_service): term 
             for term in glossary_terms
         }
         for completed_future in as_completed(term_futures):
@@ -132,7 +143,7 @@ def export_entry_links(glossary_resource_name: str, spreadsheet_url: str, billin
         _clear_sheet_with_headers(spreadsheet_url, sheets_service)
         return False
 
-    all_entry_links = fetch_all_entry_links(glossary_terms, regions_to_query, billing_project)
+    all_entry_links = fetch_all_entry_links(glossary_terms, regions_to_query, billing_project, dataplex_service=dataplex_service)
     if not all_entry_links:
         logger.info("No entry links found")
         _clear_sheet_with_headers(spreadsheet_url, sheets_service)
@@ -144,6 +155,7 @@ def export_entry_links(glossary_resource_name: str, spreadsheet_url: str, billin
     sheet_name = _write_entry_links_to_sheet(unique_entry_links, spreadsheet_url, sheets_service)
     logger.info(f"Data exported to sheet: '{sheet_name}' ({len(unique_entry_links)} entry links)")
     return True
+
 
 
 def _handle_export_exception(exception: Exception) -> int:
