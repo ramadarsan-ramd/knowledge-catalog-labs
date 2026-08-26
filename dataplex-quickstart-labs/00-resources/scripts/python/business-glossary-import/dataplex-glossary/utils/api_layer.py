@@ -371,11 +371,15 @@ def resolve_term_entry_to_display_identifier(dataplex_service: build, term_entry
     if not match:
         raise InvalidTermNameError(f"Invalid term resource name: {term_resource_name}")
 
-    project_id = match.group('project_id')
+    inner_project = match.group('project_id')
     location_id = match.group('location_id')
     glossary_id = match.group('glossary_id')
 
-    glossary_resource_name = f"projects/{project_id}/locations/{location_id}/glossaries/{glossary_id}"
+    # Prefer outer project ID if it is alphanumeric (not pure numeric digits)
+    outer_project, _, _, _ = parse_entry_name(term_entry_name)
+    project_id = outer_project if (outer_project and not outer_project.isdigit()) else inner_project
+
+    glossary_resource_name = f"projects/{inner_project}/locations/{location_id}/glossaries/{glossary_id}"
     glossary = get_glossary(dataplex_service, glossary_resource_name)
     term = get_term(dataplex_service, term_resource_name)
 
@@ -408,7 +412,7 @@ def get_entry_fqn(dataplex_service: build, entry_resource_name: str, user_projec
     return fqn
 
 
-def lookup_term_by_display_identifier(dataplex_service: build, identifier: str) -> str:
+def lookup_term_by_display_identifier(dataplex_service: build, identifier: str, user_project: str = "") -> str:
     """Resolves a human-readable term identifier to a Dataplex term entry resource name."""
     from utils import business_glossary_utils
     parsed = business_glossary_utils.parse_term_display_identifier(identifier)
@@ -455,7 +459,11 @@ def lookup_term_by_display_identifier(dataplex_service: build, identifier: str) 
         )
 
     term_resource_name = terms_map[target_term_key]
-    return business_glossary_utils.generate_entry_name_from_term_name(term_resource_name)
+    try:
+        project_number = get_project_number(parsed.project_id, user_project or parsed.project_id)
+    except Exception:
+        project_number = parsed.project_id
+    return business_glossary_utils.generate_entry_name_from_term_name(term_resource_name, project_number=project_number)
 
 
 def lookup_entry_by_fqn(

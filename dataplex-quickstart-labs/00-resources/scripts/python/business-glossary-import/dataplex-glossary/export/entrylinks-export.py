@@ -84,7 +84,16 @@ def fetch_entry_links_for_term(
 ) -> list:
     """Fetch all entry links for a term across relevant regions and convert to rows."""
     term_name = glossary_term["name"]
-    term_entry_name = business_glossary_utils.generate_entry_name_from_term_name(term_name)
+    try:
+        project_id = business_glossary_utils.extract_project_id_from_name(term_name)
+        project_number = api_layer.get_project_number(project_id, billing_project)
+    except Exception as e:
+        logger.debug(f"Could not resolve project number for '{term_name}': {e}")
+        project_number = ""
+
+    term_entry_name = business_glossary_utils.generate_entry_name_from_term_name(
+        term_name, project_number=project_number
+    )
     
     if not regions_to_query:
         return []

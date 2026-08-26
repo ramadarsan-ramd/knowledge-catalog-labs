@@ -33,16 +33,17 @@ def extract_glossary_name(url: str) -> str:
     )
 
 
-def generate_entry_name_from_term_name(term_name: str) -> str:
+def generate_entry_name_from_term_name(term_name: str, project_number: str = "") -> str:
     """
     Generates a Dataplex entry ID from a glossary term name.
     
     Args:
         term_name: The full term name in format:
                    projects/{project}/locations/{location}/glossaries/{glossary}/terms/{term}
+        project_number: Optional numeric project number. If provided, used for the inner entry ID.
     Returns:
         The generated entry ID in format:
-        projects/{project}/locations/{location}/entryGroups/@dataplex/entries/projects/{project}/locations/{location}/glossaries/{glossary}/terms/{term}
+        projects/{project}/locations/{location}/entryGroups/@dataplex/entries/projects/{project_number_or_id}/locations/{location}/glossaries/{glossary}/terms/{term}
     """
     match = TERM_NAME_PATTERN.match(term_name)
     if not match:
@@ -53,9 +54,25 @@ def generate_entry_name_from_term_name(term_name: str) -> str:
     glossary_id = match.group('glossary_id')
     term_id = match.group('term_id')
     
+    inner_project = project_number if project_number else project_id
+    
     return (
         f"projects/{project_id}/locations/{location_id}/entryGroups/{DATAPLEX_SYSTEM_ENTRY_GROUP}/entries/"
-        f"projects/{project_id}/locations/{location_id}/glossaries/{glossary_id}/terms/{term_id}"
+        f"projects/{inner_project}/locations/{location_id}/glossaries/{glossary_id}/terms/{term_id}"
+    )
+
+
+def extract_project_id_from_name(resource_name: str) -> str:
+    """
+    Extracts the project ID from a Dataplex resource name (glossary, term, category, entry).
+    """
+    project_pattern = re.compile(r"projects/(?P<project_id>[^/]+)")
+    match = project_pattern.search(resource_name)
+    if match:
+        return match.group('project_id')
+    raise ValueError(
+        f"Could not extract project from resource name: {resource_name}. "
+        f"Expected format containing 'projects/{{project}}'"
     )
 
 
