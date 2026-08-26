@@ -494,14 +494,18 @@ class TestLookupEntryByFQN:
             'name': 'projects/my-proj/locations/us/entryGroups/@bigquery/entries/orders',
             'fullyQualifiedName': 'bigquery:my-proj.ds.orders'
         }
-        monkeypatch.setattr(api_layer, 'lookup_entry', lambda s, entry_name, project_location_name: mock_entry)
+        mock_service.projects().locations().entryGroups().entries().get().execute.return_value = mock_entry
 
         entry = api_layer.lookup_entry_by_fqn(mock_service, 'bigquery:my-proj.ds.orders', 'user-proj')
         assert entry['name'] == 'projects/my-proj/locations/us/entryGroups/@bigquery/entries/orders'
+        # Cached second call
+        entry2 = api_layer.lookup_entry_by_fqn(mock_service, 'bigquery:my-proj.ds.orders', 'user-proj')
+        assert entry2['name'] == 'projects/my-proj/locations/us/entryGroups/@bigquery/entries/orders'
 
     def test_raises_when_fqn_not_found(self, monkeypatch):
         from utils.error import EntryFQNNotFoundError
         mock_service = MagicMock()
+        mock_service.projects().locations().entryGroups().entries().get().execute.side_effect = Exception("Not found")
         monkeypatch.setattr(api_layer, 'lookup_entry', lambda s, entry_name, project_location_name: None)
 
         with pytest.raises(EntryFQNNotFoundError):

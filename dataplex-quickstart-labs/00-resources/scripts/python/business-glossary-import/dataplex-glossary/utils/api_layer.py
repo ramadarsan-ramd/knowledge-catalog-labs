@@ -514,12 +514,56 @@ def lookup_term_by_display_identifier(dataplex_service: build, identifier: str, 
 def lookup_entry_by_fqn(
     dataplex_service: build, fqn: str, user_project: str, location: str = "global"
 ) -> Dict:
-    """Looks up a Dataplex entry by its Fully Qualified Name (FQN) with caching."""
+    """Looks up a Dataplex entry by its Fully Qualified Name (FQN) or entry path with caching."""
     if fqn in _fqn_to_entry_cache:
         return _fqn_to_entry_cache[fqn]
 
+    # Handle BigQuery FQN (e.g. bigquery:project.dataset.table)
+    if fqn.startswith("bigquery:"):
+        _, body = fqn.split(":", 1)
+        parts = body.split(".")
+        if len(parts) >= 3:
+            proj = parts[0]
+            ds = parts[1]
+            tbl = ".".join(parts[2:])
+
+            candidate_locations = ["us", "us-central1", "eu", "us-east1", "us-west1", "global"]
+            try:
+                all_locs = list_supported_locations(user_project or proj, dataplex_service)
+                for loc in all_locs:
+                    if loc not in candidate_locations:
+                        candidate_locations.append(loc)
+            except Exception:
+                pass
+
+            for loc in candidate_locations:
+                candidate_name = (
+                    f"projects/{proj}/locations/{loc}/entryGroups/@bigquery/entries/"
+                    f"bigquery.googleapis.com/projects/{proj}/datasets/{ds}/tables/{tbl}"
+                )
+                try:
+                    request = dataplex_service.projects().locations().entryGroups().entries().get(
+                        name=candidate_name
+                    )
+                    entry_dict = execute_with_retry(request.execute, f"Get BigQuery entry {candidate_name}")
+                    if entry_dict:
+                        _fqn_to_entry_cache[fqn] = entry_dict
+                        if entry_dict.get('name'):
+                            _entry_to_fqn_cache[entry_dict['name']] = fqn
+                        return entry_dict
+                except Exception:
+                    continue
+
+    # Fallback to direct lookupEntry (for full resource names or other systems)
     parent = f"projects/{user_project}/locations/{location}"
     entry_dict = lookup_entry(dataplex_service, entry_name=fqn, project_location_name=parent)
+    if not entry_dict and fqn.startswith("projects/"):
+        try:
+            request = dataplex_service.projects().locations().entryGroups().entries().get(name=fqn)
+            entry_dict = execute_with_retry(request.execute, f"Get entry {fqn}")
+        except Exception:
+            entry_dict = None
+
     if not entry_dict:
         raise EntryFQNNotFoundError(f"Entry with FQN '{fqn}' not found in Dataplex under project '{user_project}'")
 
