@@ -326,12 +326,14 @@ def build_entry_link(
         return None
 
     try:
-        project_id, location, entry_group = _parse_source_entry_components(source_entry)
+        source_proj, source_loc, source_eg = _parse_source_entry_components(source_entry)
+        container_entry = target_entry if link_type == DP_LINK_TYPE_DEFINITION else source_entry
+        project_id, location, entry_group = _parse_source_entry_components(container_entry)
     except Exception as parse_error:
-        logger.error(f"Failed to parse source entry components from '{source_entry}': {parse_error}")
+        logger.error(f"Failed to parse entry components: {parse_error}")
         return None
-    
-    entry_refs = build_entry_references(source_entry, target_entry, column_val, entry_group, link_type)
+
+    entry_refs = build_entry_references(source_entry, target_entry, column_val, source_eg, link_type)
     entrylink_name = _generate_entrylink_name(project_id, location, entry_group)
     
     entrylink = EntryLink(
