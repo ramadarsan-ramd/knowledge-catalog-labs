@@ -275,7 +275,10 @@ def _resolve_source_entry_name(
     
     if link_type == DP_LINK_TYPE_DEFINITION:
         if dataplex_service:
-            return api_layer.lookup_entry_by_fqn(dataplex_service, source_str, user_project)
+            entry_res = api_layer.lookup_entry_by_fqn(dataplex_service, source_str, user_project)
+            if isinstance(entry_res, dict):
+                return entry_res.get('name', '')
+            return str(entry_res)
         raise ValueError(f"Cannot resolve FQN '{source_str}' without Dataplex service")
     else:
         if dataplex_service:
