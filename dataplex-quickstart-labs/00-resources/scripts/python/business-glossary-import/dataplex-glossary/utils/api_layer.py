@@ -38,12 +38,15 @@ _project_glossaries_cache: Dict[str, List[Dict]] = {}
 _glossary_terms_map_cache: Dict[str, Dict[str, str]] = {}
 _fqn_to_entry_cache: Dict[str, Dict] = {}
 _entry_to_fqn_cache: Dict[str, str] = {}
+_project_id_to_number_cache: Dict[str, str] = {}
+_project_number_to_id_cache: Dict[str, str] = {}
 
 
 def clear_caches():
     """Clear all in-memory caches (useful between batch runs and in unit tests)."""
     global _locations_cache, _glossary_cache, _term_cache, _project_glossaries_cache
     global _glossary_terms_map_cache, _fqn_to_entry_cache, _entry_to_fqn_cache
+    global _project_id_to_number_cache, _project_number_to_id_cache
     _locations_cache.clear()
     _glossary_cache.clear()
     _term_cache.clear()
@@ -51,6 +54,8 @@ def clear_caches():
     _glossary_terms_map_cache.clear()
     _fqn_to_entry_cache.clear()
     _entry_to_fqn_cache.clear()
+    _project_id_to_number_cache.clear()
+    _project_number_to_id_cache.clear()
 
 
 # Global throttle lock for lookupEntryLinks API calls.
@@ -262,10 +267,43 @@ def _extract_project_number_from_info(project_info: dict) -> str:
     raise DataplexAPIError(f"Project number not found in project info: {project_info}")
 
 
-def get_project_number(project_id: str, user_project: str) -> str:
-    """Fetches the project number from the project ID (composed from smaller helpers)."""
-    project_info = _fetch_project_info(project_id, user_project)
-    return _extract_project_number_from_info(project_info)
+def get_project_number(project_id: str, user_project: str = "") -> str:
+    """Fetches the numeric project number from the project ID (cached)."""
+    if not project_id:
+        return ""
+    if project_id.isdigit():
+        return project_id
+    if project_id in _project_id_to_number_cache:
+        return _project_id_to_number_cache[project_id]
+
+    project_info = _fetch_project_info(project_id, user_project or project_id)
+    proj_number = _extract_project_number_from_info(project_info)
+    _project_id_to_number_cache[project_id] = proj_number
+    if project_info.get("projectId"):
+        _project_number_to_id_cache[proj_number] = project_info["projectId"]
+    return proj_number
+
+
+def get_project_id_from_number(project_identifier: str, user_project: str = "") -> str:
+    """Resolves a numeric project number to its alphanumeric project ID (cached)."""
+    if not project_identifier:
+        return ""
+    if not project_identifier.isdigit():
+        return project_identifier
+    if project_identifier in _project_number_to_id_cache:
+        return _project_number_to_id_cache[project_identifier]
+
+    try:
+        project_info = _fetch_project_info(project_identifier, user_project or project_identifier)
+        proj_id = project_info.get("projectId")
+        if proj_id:
+            _project_number_to_id_cache[project_identifier] = proj_id
+            _project_id_to_number_cache[proj_id] = project_identifier
+            return proj_id
+    except Exception as e:
+        logger.debug(f"Could not resolve project ID for number '{project_identifier}': {e}")
+
+    return project_identifier
 
 
 def list_supported_locations(billing_project: str, dataplex_service=None, force_refresh: bool = False) -> List[str]:
@@ -362,7 +400,9 @@ def list_glossaries(dataplex_service: build, parent: str) -> List[Dict]:
         raise DataplexAPIError(f"Error listing glossaries for {parent}: {e}")
 
 
-def resolve_term_entry_to_display_identifier(dataplex_service: build, term_entry_name: str) -> str:
+def resolve_term_entry_to_display_identifier(
+    dataplex_service: build, term_entry_name: str, user_project: str = ""
+) -> str:
     """Resolves a Dataplex term entry resource name into '<project>.<location>.<glossaryDisplayName>.<termDisplayName>'."""
     from utils import business_glossary_utils
     term_resource_name = business_glossary_utils.extract_term_resource_from_entry_name(term_entry_name)
@@ -375,9 +415,14 @@ def resolve_term_entry_to_display_identifier(dataplex_service: build, term_entry
     location_id = match.group('location_id')
     glossary_id = match.group('glossary_id')
 
-    # Prefer outer project ID if it is alphanumeric (not pure numeric digits)
+    # Resolve to alphanumeric project ID if possible
     outer_project, _, _, _ = parse_entry_name(term_entry_name)
-    project_id = outer_project if (outer_project and not outer_project.isdigit()) else inner_project
+    if outer_project and not outer_project.isdigit():
+        display_project = outer_project
+    elif inner_project.isdigit():
+        display_project = get_project_id_from_number(inner_project, user_project or inner_project)
+    else:
+        display_project = inner_project
 
     glossary_resource_name = f"projects/{inner_project}/locations/{location_id}/glossaries/{glossary_id}"
     glossary = get_glossary(dataplex_service, glossary_resource_name)
@@ -387,7 +432,7 @@ def resolve_term_entry_to_display_identifier(dataplex_service: build, term_entry
     term_display_name = term.get('displayName') or match.group('term_id')
 
     return business_glossary_utils.format_term_display_identifier(
-        project_id, location_id, glossary_display_name, term_display_name
+        display_project, location_id, glossary_display_name, term_display_name
     )
 
 

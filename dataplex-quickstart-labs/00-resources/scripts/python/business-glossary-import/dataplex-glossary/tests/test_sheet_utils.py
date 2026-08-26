@@ -377,7 +377,7 @@ class TestEntryLinksToRows:
         monkeypatch.setattr(api_layer, 'get_entry_fqn', lambda s, entry, p: 'bigquery:proj.ds.tbl')
         monkeypatch.setattr(
             api_layer, 'resolve_term_entry_to_display_identifier',
-            lambda s, entry: 'proj.global.Sales.Order ID'
+            lambda s, entry, **kwargs: 'proj.global.Sales.Order ID'
         )
 
         entry_links = [

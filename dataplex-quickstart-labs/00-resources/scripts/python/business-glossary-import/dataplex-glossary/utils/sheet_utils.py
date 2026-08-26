@@ -314,11 +314,11 @@ def _add_entry_link_to_rows(
         if link_type == "definition":
             source_val = api_layer.get_entry_fqn(dataplex_service, source_raw, user_project)
             column_val = business_glossary_utils.extract_column_from_source_path(path_raw)
-            target_val = api_layer.resolve_term_entry_to_display_identifier(dataplex_service, target_raw)
+            target_val = api_layer.resolve_term_entry_to_display_identifier(dataplex_service, target_raw, user_project=user_project)
         else:
-            source_val = api_layer.resolve_term_entry_to_display_identifier(dataplex_service, source_raw)
+            source_val = api_layer.resolve_term_entry_to_display_identifier(dataplex_service, source_raw, user_project=user_project)
             column_val = ""
-            target_val = api_layer.resolve_term_entry_to_display_identifier(dataplex_service, target_raw)
+            target_val = api_layer.resolve_term_entry_to_display_identifier(dataplex_service, target_raw, user_project=user_project)
     else:
         source_val = source_raw
         column_val = business_glossary_utils.extract_column_from_source_path(path_raw)
