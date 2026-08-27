@@ -83,6 +83,9 @@ def fetch_entry_links_for_term(
     glossary_term: dict, regions_to_query: list, billing_project: str, dataplex_service=None
 ) -> list:
     """Fetch all entry links for a term across relevant regions and convert to rows."""
+    if dataplex_service is None:
+        dataplex_service = api_layer.get_dataplex_service()
+
     term_name = glossary_term["name"]
     try:
         project_id = business_glossary_utils.extract_project_id_from_name(term_name)
@@ -107,7 +110,7 @@ def fetch_entry_links_for_term(
 def fetch_all_entry_links(
     glossary_terms: list, regions_to_query: list, billing_project: str, dataplex_service=None
 ) -> list:
-    """Fetch entry links for all terms in parallel."""
+    """Fetch entry links for all terms in parallel using thread-local service clients."""
     all_entry_links = []
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         term_futures = {
@@ -152,7 +155,7 @@ def export_entry_links(glossary_resource_name: str, spreadsheet_url: str, billin
         _clear_sheet_with_headers(spreadsheet_url, sheets_service)
         return False
 
-    all_entry_links = fetch_all_entry_links(glossary_terms, regions_to_query, billing_project, dataplex_service=dataplex_service)
+    all_entry_links = fetch_all_entry_links(glossary_terms, regions_to_query, billing_project)
     if not all_entry_links:
         logger.info("No entry links found")
         _clear_sheet_with_headers(spreadsheet_url, sheets_service)

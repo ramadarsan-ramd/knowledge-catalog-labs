@@ -271,14 +271,14 @@ def _resolve_source_entry_name(
     """Resolve source string (FQN, term identifier, or full entry name) to Dataplex entry name."""
     source_str = source_str.strip()
     if source_str.startswith('projects/'):
-        return source_str
+        return api_layer.normalize_entry_name_project_number(source_str, user_project)
     
     if link_type == DP_LINK_TYPE_DEFINITION:
         if dataplex_service:
             entry_res = api_layer.lookup_entry_by_fqn(dataplex_service, source_str, user_project)
             if isinstance(entry_res, dict):
-                return entry_res.get('name', '')
-            return str(entry_res)
+                return api_layer.normalize_entry_name_project_number(entry_res.get('name', ''), user_project)
+            return api_layer.normalize_entry_name_project_number(str(entry_res), user_project)
         raise ValueError(f"Cannot resolve FQN '{source_str}' without Dataplex service")
     else:
         if dataplex_service:
@@ -294,7 +294,7 @@ def _resolve_target_entry_name(
     """Resolve target string (term identifier or full entry name) to Dataplex entry name."""
     target_str = target_str.strip()
     if target_str.startswith('projects/'):
-        return target_str
+        return api_layer.normalize_entry_name_project_number(target_str, user_project)
     
     if dataplex_service:
         return api_layer.lookup_term_by_display_identifier(dataplex_service, target_str, user_project)
@@ -327,10 +327,10 @@ def build_entry_link(
 
     try:
         source_proj, source_loc, source_eg = _parse_source_entry_components(source_entry)
-        container_entry = target_entry if link_type == DP_LINK_TYPE_DEFINITION else source_entry
+        container_entry = source_entry
         project_id, location, entry_group = _parse_source_entry_components(container_entry)
     except Exception as parse_error:
-        logger.error(f"Failed to parse entry components: {parse_error}")
+        logger.error(f"Failed to parse source entry components from '{source_entry}': {parse_error}")
         return None
 
     entry_refs = build_entry_references(source_entry, target_entry, column_val, source_eg, link_type)

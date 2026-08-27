@@ -117,8 +117,8 @@ class TestColumnExtractionAndFormatting:
         assert business_glossary_utils.format_source_path_from_column("order_id", "@bigquery") == "Schema.order_id"
         assert business_glossary_utils.format_source_path_from_column("Schema.order_id", "@bigquery") == "Schema.order_id"
 
-    def test_format_column_preserves_non_bigquery(self):
-        assert business_glossary_utils.format_source_path_from_column("custom_field", "custom_group") == "custom_field"
+    def test_format_column_prepends_schema_for_custom_group(self):
+        assert business_glossary_utils.format_source_path_from_column("custom_field", "custom_group") == "Schema.custom_field"
 
     def test_format_column_empty_returns_empty(self):
         assert business_glossary_utils.format_source_path_from_column("", "@bigquery") == ""

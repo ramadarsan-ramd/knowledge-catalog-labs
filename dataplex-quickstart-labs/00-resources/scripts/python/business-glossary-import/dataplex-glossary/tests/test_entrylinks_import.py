@@ -223,13 +223,13 @@ class TestFormatSourcePathForBigquery:
         assert 'Schema.' in result
     
     def test_handles_non_bigquery_entry_group(self):
-        """Non-bigquery entry group should return path as-is"""
+        """Non-bigquery entry group should also format column paths with Schema."""
         result = entrylinks_import._format_source_path_for_bigquery(
             'some/path', 'custom_group'
         )
         
         assert isinstance(result, str)
-        assert result == 'some/path'
+        assert result == 'Schema.some/path'
 
 
 # ============================================================================
@@ -462,6 +462,10 @@ class TestRunImportWorkflow:
 class TestResolutionHelpers:
     """Test resolution helpers for human-readable identifiers and FQNs"""
 
+    @pytest.fixture(autouse=True)
+    def setup_api_layer_mocks(self, monkeypatch):
+        monkeypatch.setattr(entrylinks_import.api_layer, 'get_project_number', lambda p, u=None: p)
+
     def test_resolve_source_entry_passthrough_full_path(self):
         """Full entry paths starting with projects/ should pass through unchanged"""
         full_path = 'projects/p/locations/l/entryGroups/@dataplex/entries/.../terms/t'
@@ -529,6 +533,7 @@ class TestResolutionHelpers:
 
         link = entrylinks_import.build_entry_link(row, dataplex_service=mock_service, user_project='my_proj')
         assert link is not None
+        assert 'entryGroups/@bigquery/entryLinks/' in link.name
         assert link.entryLinkType == 'projects/dataplex-types/locations/global/entryLinkTypes/definition'
         assert len(link.entryReferences) == 2
         assert link.entryReferences[0].name == 'projects/p/locations/us/entryGroups/@bigquery/entries/e1'

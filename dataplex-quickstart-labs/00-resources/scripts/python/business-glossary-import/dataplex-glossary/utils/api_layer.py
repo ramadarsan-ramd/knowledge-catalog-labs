@@ -92,6 +92,16 @@ def authenticate_dataplex() -> build:
         raise DataplexAPIError(f"Dataplex auth error: {e}")
 
 
+_thread_local = threading.local()
+
+
+def get_dataplex_service() -> build:
+    """Get or create a thread-local Dataplex service instance to prevent SSL socket corruption in multi-threaded execution."""
+    if not hasattr(_thread_local, 'dataplex_service') or _thread_local.dataplex_service is None:
+        _thread_local.dataplex_service = authenticate_dataplex()
+    return _thread_local.dataplex_service
+
+
 def list_glossary_terms(dataplex_service: build, glossary_name: str) -> List[Dict]:
     """Lists terms from a Dataplex glossary with pagination support."""
     all_terms = []
@@ -511,6 +521,23 @@ def lookup_term_by_display_identifier(dataplex_service: build, identifier: str, 
     return business_glossary_utils.generate_entry_name_from_term_name(term_resource_name, project_number=project_number)
 
 
+def normalize_entry_name_project_number(entry_name: str, user_project: str = "") -> str:
+    """Normalize the outer project in a Dataplex entry resource name to numeric project number."""
+    if not entry_name or not entry_name.startswith("projects/"):
+        return entry_name
+    parts = entry_name.split("/")
+    if len(parts) >= 2:
+        proj = parts[1]
+        if not proj.isdigit():
+            try:
+                proj_num = get_project_number(proj, user_project or proj)
+                parts[1] = str(proj_num)
+                return "/".join(parts)
+            except Exception:
+                pass
+    return entry_name
+
+
 def lookup_entry_by_fqn(
     dataplex_service: build, fqn: str, user_project: str, location: str = "global"
 ) -> Dict:
@@ -526,6 +553,11 @@ def lookup_entry_by_fqn(
             proj = parts[0]
             ds = parts[1]
             tbl = ".".join(parts[2:])
+
+            try:
+                proj_num = get_project_number(proj, user_project or proj)
+            except Exception:
+                proj_num = proj
 
             candidate_locations = ["us", "us-central1", "eu", "us-east1", "us-west1", "global"]
             try:
@@ -547,9 +579,10 @@ def lookup_entry_by_fqn(
                     )
                     entry_dict = execute_with_retry(request.execute, f"Get BigQuery entry {candidate_name}")
                     if entry_dict:
-                        _fqn_to_entry_cache[fqn] = entry_dict
                         if entry_dict.get('name'):
+                            entry_dict['name'] = normalize_entry_name_project_number(entry_dict['name'], user_project or proj)
                             _entry_to_fqn_cache[entry_dict['name']] = fqn
+                        _fqn_to_entry_cache[fqn] = entry_dict
                         return entry_dict
                 except Exception:
                     continue
@@ -567,7 +600,8 @@ def lookup_entry_by_fqn(
     if not entry_dict:
         raise EntryFQNNotFoundError(f"Entry with FQN '{fqn}' not found in Dataplex under project '{user_project}'")
 
+    if entry_dict.get('name'):
+        entry_dict['name'] = normalize_entry_name_project_number(entry_dict['name'], user_project)
+        _entry_to_fqn_cache[entry_dict['name']] = fqn
     _fqn_to_entry_cache[fqn] = entry_dict
-    if entry_dict.get('name') and entry_dict.get('fullyQualifiedName'):
-        _entry_to_fqn_cache[entry_dict['name']] = entry_dict['fullyQualifiedName']
     return entry_dict

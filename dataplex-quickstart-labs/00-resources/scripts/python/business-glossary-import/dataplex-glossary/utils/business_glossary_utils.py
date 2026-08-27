@@ -55,9 +55,10 @@ def generate_entry_name_from_term_name(term_name: str, project_number: str = "")
     term_id = match.group('term_id')
     
     inner_project = project_number if project_number else project_id
+    outer_project = project_number if project_number else project_id
     
     return (
-        f"projects/{project_id}/locations/{location_id}/entryGroups/{DATAPLEX_SYSTEM_ENTRY_GROUP}/entries/"
+        f"projects/{outer_project}/locations/{location_id}/entryGroups/{DATAPLEX_SYSTEM_ENTRY_GROUP}/entries/"
         f"projects/{inner_project}/locations/{location_id}/glossaries/{glossary_id}/terms/{term_id}"
     )
 
@@ -227,12 +228,14 @@ def extract_column_from_source_path(source_path: str) -> str:
 
 
 def format_source_path_from_column(column: str, entry_group: str = "") -> str:
-    """Format a column name into a Dataplex source path (prepending 'Schema.' for BigQuery).
+    """Format a column name into a Dataplex source path (prepending 'Schema.').
 
     Example:
-        >>> format_source_path_from_column("order_id", "@bigquery")
+        >>> format_source_path_from_column("order_id")
         'Schema.order_id'
-        >>> format_source_path_from_column("", "@bigquery")
+        >>> format_source_path_from_column("Schema.order_id")
+        'Schema.order_id'
+        >>> format_source_path_from_column("")
         ''
     """
     if not column:
@@ -240,8 +243,7 @@ def format_source_path_from_column(column: str, entry_group: str = "") -> str:
     cleaned = column.strip()
     if not cleaned:
         return ""
-    # Prepend Schema. if entry_group is BigQuery and Schema. is not already present
-    if (entry_group == "@bigquery" or entry_group.endswith("bigquery")) and not cleaned.startswith("Schema."):
+    if not cleaned.startswith("Schema."):
         return f"Schema.{cleaned}"
     return cleaned
 

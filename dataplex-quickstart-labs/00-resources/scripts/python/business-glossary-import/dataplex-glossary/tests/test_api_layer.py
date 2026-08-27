@@ -437,6 +437,7 @@ class TestLookupTermByDisplayIdentifier:
 
     def test_resolves_valid_display_identifier(self, monkeypatch):
         mock_service = MagicMock()
+        monkeypatch.setattr(api_layer, 'get_project_number', lambda p, u=None: p)
         monkeypatch.setattr(
             api_layer, 'list_glossaries',
             lambda s, parent: [{'name': 'projects/my-proj/locations/global/glossaries/g1', 'displayName': 'Sales Glossary'}]
@@ -490,6 +491,7 @@ class TestLookupEntryByFQN:
 
     def test_resolves_and_caches_entry(self, monkeypatch):
         mock_service = MagicMock()
+        monkeypatch.setattr(api_layer, 'get_project_number', lambda p, u=None: p)
         mock_entry = {
             'name': 'projects/my-proj/locations/us/entryGroups/@bigquery/entries/orders',
             'fullyQualifiedName': 'bigquery:my-proj.ds.orders'
@@ -505,6 +507,8 @@ class TestLookupEntryByFQN:
     def test_raises_when_fqn_not_found(self, monkeypatch):
         from utils.error import EntryFQNNotFoundError
         mock_service = MagicMock()
+        monkeypatch.setattr(api_layer, 'get_project_number', lambda p, u=None: p)
+        monkeypatch.setattr(api_layer, 'list_supported_locations', lambda p, s: ['us'])
         mock_service.projects().locations().entryGroups().entries().get().execute.side_effect = Exception("Not found")
         monkeypatch.setattr(api_layer, 'lookup_entry', lambda s, entry_name, project_location_name: None)
 
