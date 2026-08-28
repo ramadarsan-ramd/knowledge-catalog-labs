@@ -504,13 +504,31 @@ class TestLookupEntryByFQN:
         entry2 = api_layer.lookup_entry_by_fqn(mock_service, 'bigquery:my-proj.ds.orders', 'user-proj')
         assert entry2['name'] == 'projects/my-proj/locations/us/entryGroups/@bigquery/entries/orders'
 
+    def test_resolves_custom_fqn_via_search_entries(self, monkeypatch):
+        mock_service = MagicMock()
+        monkeypatch.setattr(api_layer, 'get_project_number', lambda p, u=None: p)
+        mock_entry = {
+            'name': 'projects/my-proj/locations/us-central1/entryGroups/my-eg/entries/custom-01',
+            'fullyQualifiedName': 'custom:my_ds.custom_01'
+        }
+        mock_service.projects().locations().searchEntries().execute.return_value = {
+            'results': [{'dataplexEntry': mock_entry}]
+        }
+
+        entry = api_layer.lookup_entry_by_fqn(mock_service, 'custom:my_ds.custom_01', 'user-proj')
+        assert entry['name'] == 'projects/my-proj/locations/us-central1/entryGroups/my-eg/entries/custom-01'
+        assert entry['fullyQualifiedName'] == 'custom:my_ds.custom_01'
+        # Cached second call
+        entry2 = api_layer.lookup_entry_by_fqn(mock_service, 'custom:my_ds.custom_01', 'user-proj')
+        assert entry2['name'] == 'projects/my-proj/locations/us-central1/entryGroups/my-eg/entries/custom-01'
+
     def test_raises_when_fqn_not_found(self, monkeypatch):
         from utils.error import EntryFQNNotFoundError
         mock_service = MagicMock()
         monkeypatch.setattr(api_layer, 'get_project_number', lambda p, u=None: p)
         monkeypatch.setattr(api_layer, 'list_supported_locations', lambda p, s: ['us'])
         mock_service.projects().locations().entryGroups().entries().get().execute.side_effect = Exception("Not found")
-        monkeypatch.setattr(api_layer, 'lookup_entry', lambda s, entry_name, project_location_name: None)
+        mock_service.projects().locations().searchEntries().execute.return_value = {'results': []}
 
         with pytest.raises(EntryFQNNotFoundError):
             api_layer.lookup_entry_by_fqn(mock_service, 'bigquery:missing.ds.tbl', 'user-proj')

@@ -587,14 +587,35 @@ def lookup_entry_by_fqn(
                 except Exception:
                     continue
 
-    # Fallback to direct lookupEntry (for full resource names or other systems)
-    parent = f"projects/{user_project}/locations/{location}"
-    entry_dict = lookup_entry(dataplex_service, entry_name=fqn, project_location_name=parent)
-    if not entry_dict and fqn.startswith("projects/"):
+    entry_dict = None
+
+    # 1. Full resource path (projects/...)
+    if fqn.startswith("projects/"):
         try:
             request = dataplex_service.projects().locations().entryGroups().entries().get(name=fqn)
             entry_dict = execute_with_retry(request.execute, f"Get entry {fqn}")
         except Exception:
+            entry_dict = None
+    else:
+        # 2. Search Dataplex Catalog by fully_qualified_name for custom / external FQNs
+        parent = f"projects/{user_project}/locations/{location}"
+        sanitized_fqn = fqn.replace('"', '\\"')
+        try:
+            request = dataplex_service.projects().locations().searchEntries(
+                name=parent,
+                query=f'fully_qualified_name="{sanitized_fqn}"'
+            )
+            search_res = execute_with_retry(request.execute, f"Search entry by FQN {fqn}")
+            if search_res and search_res.get('results'):
+                for result in search_res['results']:
+                    dp_entry = result.get('dataplexEntry')
+                    if dp_entry:
+                        if dp_entry.get('fullyQualifiedName') == fqn or not entry_dict:
+                            entry_dict = dp_entry
+                            if dp_entry.get('fullyQualifiedName') == fqn:
+                                break
+        except Exception as e:
+            logger.debug(f"searchEntries failed for FQN '{fqn}': {e}")
             entry_dict = None
 
     if not entry_dict:
