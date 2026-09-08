@@ -20,16 +20,32 @@ SHEET_HEADERS = ENTRYLINK_SHEET_HEADERS
 def _build_deduplication_key(entry_link_row: list) -> tuple:
     """Build a unique key for detecting duplicate entry links.
     
-    Row format: [link_type, source, column, target]
+    Row format: [link_type, source_name, source_id, column, target_name, target_id]
+    or legacy: [link_type, source, column, target]
     """
+    if not entry_link_row:
+        return ()
     link_type = entry_link_row[0]
-    source = entry_link_row[1]
-    column = entry_link_row[2] if len(entry_link_row) > 2 else ''
-    target = entry_link_row[3] if len(entry_link_row) > 3 else ''
+    if len(entry_link_row) >= 6:
+        source_name = entry_link_row[1]
+        source_id = entry_link_row[2]
+        column = entry_link_row[3]
+        target_name = entry_link_row[4]
+        target_id = entry_link_row[5]
+        source_key = f"{source_name}:{source_id}" if (source_name and source_id) else (source_id or source_name)
+        target_key = f"{target_name}:{target_id}" if (target_name and target_id) else (target_id or target_name)
+    elif len(entry_link_row) == 4:
+        source_key = entry_link_row[1]
+        column = entry_link_row[2]
+        target_key = entry_link_row[3]
+    else:
+        source_key = entry_link_row[1] if len(entry_link_row) > 1 else ''
+        column = entry_link_row[2] if len(entry_link_row) > 2 else ''
+        target_key = entry_link_row[3] if len(entry_link_row) > 3 else ''
     
     if link_type in ("synonym", "related"):
-        return (link_type, tuple(sorted([source, target])), column)
-    return (link_type, source, target, column)
+        return (link_type, tuple(sorted([source_key, target_key])), column)
+    return (link_type, source_key, target_key, column)
 
 
 def deduplicate_entry_links(entry_links: list) -> list:

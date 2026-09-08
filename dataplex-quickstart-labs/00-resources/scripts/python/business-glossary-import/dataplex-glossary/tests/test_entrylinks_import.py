@@ -540,6 +540,48 @@ class TestResolutionHelpers:
         assert link.entryReferences[0].path == 'Schema.order_id'
         assert link.entryReferences[1].name == 'projects/p/locations/global/entryGroups/@dataplex/entries/.../terms/t1'
 
+    def test_build_entry_link_with_6_columns(self, monkeypatch):
+        """build_entry_link should handle explicit 6-column SpreadsheetRow"""
+        from utils.models import SpreadsheetRow
+        mock_service = Mock()
+        monkeypatch.setattr(
+            entrylinks_import.api_layer, 'lookup_entry_by_fqn',
+            lambda s, fqn, p: 'projects/p/locations/us/entryGroups/@bigquery/entries/e1'
+        )
+        monkeypatch.setattr(
+            entrylinks_import.api_layer, 'lookup_term_by_display_identifier',
+            lambda s, term_id, p: 'projects/p/locations/global/entryGroups/@dataplex/entries/.../terms/t1'
+        )
+
+        row = SpreadsheetRow(
+            entry_link_type='definition',
+            source_name='bigquery:my_proj.my_ds.my_table',
+            source_id='my_table',
+            column='order_id',
+            target_name='my_proj.global.Sales.Order ID',
+            target_id='order_id_term'
+        )
+
+        link = entrylinks_import.build_entry_link(row, dataplex_service=mock_service, user_project='my_proj')
+        assert link is not None
+        assert len(link.entryReferences) == 2
+        assert link.entryReferences[0].name == 'projects/p/locations/us/entryGroups/@bigquery/entries/e1'
+        assert link.entryReferences[0].path == 'Schema.order_id'
+        assert link.entryReferences[1].name == 'projects/p/locations/global/entryGroups/@dataplex/entries/.../terms/t1'
+
+    def test_resolve_with_full_resource_ids(self):
+        """Resolving with full term resource names in ID columns generates correct entry names"""
+        source_id = 'projects/p/locations/global/glossaries/g1/terms/t1'
+        result = entrylinks_import._resolve_source_entry_name('', 'synonym', source_id=source_id)
+        assert 'entryGroups/@dataplex/entries/' in result
+        assert 'glossaries/g1/terms/t1' in result
+
+        target_id = 'projects/p/locations/global/glossaries/g1/terms/t2'
+        result = entrylinks_import._resolve_target_entry_name('', target_id=target_id)
+        assert 'entryGroups/@dataplex/entries/' in result
+        assert 'glossaries/g1/terms/t2' in result
+
+
 
 
 

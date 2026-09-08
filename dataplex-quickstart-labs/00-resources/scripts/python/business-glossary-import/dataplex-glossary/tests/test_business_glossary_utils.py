@@ -123,3 +123,49 @@ class TestColumnExtractionAndFormatting:
     def test_format_column_empty_returns_empty(self):
         assert business_glossary_utils.format_source_path_from_column("", "@bigquery") == ""
         assert business_glossary_utils.format_source_path_from_column(None, "@bigquery") == ""
+
+
+class TestExtractShortId:
+    """Tests for extract_short_id."""
+
+    def test_extracts_from_term_resource_path(self):
+        assert (
+            business_glossary_utils.extract_short_id(
+                "projects/my-proj/locations/global/glossaries/my-glossary/terms/term_123"
+            )
+            == "term_123"
+        )
+
+    def test_extracts_from_dataplex_term_entry_path(self):
+        assert (
+            business_glossary_utils.extract_short_id(
+                "projects/my-proj/locations/global/entryGroups/@dataplex/entries/"
+                "projects/12345/locations/global/glossaries/g1/terms/my_term"
+            )
+            == "my_term"
+        )
+
+    def test_extracts_from_colon_entry_identifier(self):
+        assert (
+            business_glossary_utils.extract_short_id(
+                "projects/p/locations/l/entryGroups/@dataplex/entries/glossary:g.term:customer_id"
+            )
+            == "customer_id"
+        )
+
+    def test_extracts_from_bigquery_fqn(self):
+        assert business_glossary_utils.extract_short_id("bigquery:my_proj.dataset.table_name") == "table_name"
+
+    def test_extracts_from_bigquery_entry(self):
+        assert (
+            business_glossary_utils.extract_short_id(
+                "projects/p/locations/us/entryGroups/@bigquery/entries/bigquery:p.d.orders"
+            )
+            == "orders"
+        )
+
+    def test_passes_through_plain_id(self):
+        assert business_glossary_utils.extract_short_id("simple_id") == "simple_id"
+        assert business_glossary_utils.extract_short_id("") == ""
+        assert business_glossary_utils.extract_short_id(None) == ""
+

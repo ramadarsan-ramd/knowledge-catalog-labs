@@ -201,31 +201,38 @@ class TestCreateEntryLinkDict:
     
     def test_creates_dict_from_row(self):
         """Create entry link dict from row"""
-        row = ['definition', 'source_entry', 'target_entry', '/path']
+        row = ['definition', 'source_name', 'src_id', '/path', 'target_name', 'tgt_id']
         
-        result = sheet_utils._create_entry_link_dict(row, 0, 1, 2, 3)
+        result = sheet_utils._create_entry_link_dict(row, 0, 1, 2, 3, 4, 5)
         
         assert result['entry_link_type'] == 'definition'
-        assert result['source_entry'] == 'source_entry'
-        assert result['target_entry'] == 'target_entry'
+        assert result['source_name'] == 'source_name'
+        assert result['source_id'] == 'src_id'
+        assert result['target_name'] == 'target_name'
+        assert result['target_id'] == 'tgt_id'
+        assert result['source_entry'] == 'src_id'
+        assert result['target_entry'] == 'tgt_id'
         assert result['source_path'] == '/path'
     
     def test_handles_missing_path(self):
         """Handle row without path column"""
-        row = ['related', 'source', 'target']
+        row = ['related', 'source_name', '', '', 'target_name', '']
         
-        result = sheet_utils._create_entry_link_dict(row, 0, 1, 2, -1)
+        result = sheet_utils._create_entry_link_dict(row, 0, 1, -1, -1, 4, -1)
         
         assert result['source_path'] == ''
+        assert result['source_name'] == 'source_name'
+        assert result['target_name'] == 'target_name'
     
     def test_strips_whitespace(self):
         """Whitespace should be stripped"""
-        row = ['  definition  ', '  source  ', '  target  ', '  /path  ']
+        row = ['  definition  ', '  source  ', '  src_id  ', '  /path  ', '  target  ', '  tgt_id  ']
         
-        result = sheet_utils._create_entry_link_dict(row, 0, 1, 2, 3)
+        result = sheet_utils._create_entry_link_dict(row, 0, 1, 2, 3, 4, 5)
         
         assert result['entry_link_type'] == 'definition'
-        assert result['source_entry'] == 'source'
+        assert result['source_name'] == 'source'
+        assert result['source_id'] == 'src_id'
 
 
 # ============================================================================
@@ -351,7 +358,7 @@ class TestEntryLinksToRows:
     """Test entry_links_to_rows function"""
     
     def test_converts_links_to_rows(self):
-        """Convert entry links to row format [type, source, column, target]"""
+        """Convert entry links to row format [type, source_name, source_id, column, target_name, target_id]"""
         entry_links = [
             {
                 'entryLinkType': 'projects/dataplex-types/locations/global/entryLinkTypes/definition',
@@ -365,10 +372,7 @@ class TestEntryLinksToRows:
         result = sheet_utils.entry_links_to_rows(entry_links)
         
         assert len(result) == 1
-        assert result[0][0] == 'definition'
-        assert result[0][1] == 'source_entry'
-        assert result[0][2] == 'order_id'
-        assert result[0][3] == 'target_entry'
+        assert result[0] == ['definition', 'source_entry', 'source_entry', 'order_id', 'target_entry', 'target_entry']
 
     def test_converts_links_with_dataplex_service(self, monkeypatch):
         """Convert entry links with FQN and display name resolution"""
@@ -393,7 +397,7 @@ class TestEntryLinksToRows:
         result = sheet_utils.entry_links_to_rows(entry_links, dataplex_service=mock_service, user_project='user-proj')
 
         assert len(result) == 1
-        assert result[0] == ['definition', 'bigquery:proj.ds.tbl', 'user_id', 'proj.global.Sales.Order ID']
+        assert result[0] == ['definition', 'bigquery:proj.ds.tbl', 'e1', 'user_id', 'proj.global.Sales.Order ID', 't1']
     
     def test_skips_invalid_link_type(self):
         """Skip entry links with invalid link type"""
@@ -440,37 +444,40 @@ class TestRowsToEntryLinkDicts:
     def test_converts_rows_to_dicts(self):
         """Convert rows to entry link dicts"""
         rows = [
-            ['Entry link type', 'Source', 'Target', 'Column'],  # Header
-            ['definition', 'src1', 'tgt1', 'order_id']
+            ['Entry link type', 'Source Name', 'Source ID', 'Column', 'Target Name', 'Target ID'],  # Header
+            ['definition', 'bigquery:proj.ds.tbl', 'src1', 'order_id', 'proj.global.Sales.Order ID', 'tgt1']
         ]
         
-        result = sheet_utils.rows_to_entry_link_dicts(rows, 0, 1, 2, 3)
+        result = sheet_utils.rows_to_entry_link_dicts(rows, 0, 1, 2, 3, 4, 5)
         
         assert len(result) == 1
         assert result[0]['entry_link_type'] == 'definition'
+        assert result[0]['source_name'] == 'bigquery:proj.ds.tbl'
+        assert result[0]['source_id'] == 'src1'
         assert result[0]['source'] == 'src1'
+        assert result[0]['target_name'] == 'proj.global.Sales.Order ID'
+        assert result[0]['target_id'] == 'tgt1'
         assert result[0]['target'] == 'tgt1'
         assert result[0]['column'] == 'order_id'
-        assert result[0]['source_entry'] == 'src1'
     
     def test_skips_rows_missing_source_or_target(self):
         """Should skip rows missing source or target"""
         rows = [
-            ['entry_link_type', 'source_entry', 'target_entry', 'source_path'],
-            ['definition', 'src1', 'tgt1', '/path1'],
-            ['definition', '', 'tgt2', '/path2'],  # Missing source
-            ['definition', 'src3', '', '/path3']   # Missing target
+            ['Entry link type', 'Source Name', 'Source ID', 'Column', 'Target Name', 'Target ID'],
+            ['definition', 'src1', '', 'order_id', 'tgt1', ''],
+            ['definition', '', '', 'order_id', 'tgt2', ''],  # Missing source
+            ['definition', 'src3', '', 'order_id', '', '']   # Missing target
         ]
         
-        result = sheet_utils.rows_to_entry_link_dicts(rows, 0, 1, 2, 3)
+        result = sheet_utils.rows_to_entry_link_dicts(rows, 0, 1, 2, 3, 4, 5)
         
         assert len(result) == 1
     
     def test_handles_empty_input(self):
         """Empty input should return empty list"""
-        rows = [['header1', 'header2', 'header3']]  # Only header
+        rows = [['header1', 'header2', 'header3', 'header4', 'header5', 'header6']]  # Only header
         
-        result = sheet_utils.rows_to_entry_link_dicts(rows, 0, 1, 2, -1)
+        result = sheet_utils.rows_to_entry_link_dicts(rows, 0, 1, -1, -1, 4, -1)
         
         assert result == []
 
@@ -483,46 +490,52 @@ class TestExtractColumnIndices:
     """Test extract_column_indices function"""
     
     def test_extracts_new_header_indices(self):
-        """Extract column indices from new human-readable headers"""
+        """Extract column indices from new 6-column headers"""
         data = [
-            ['Entry link type', 'Source', 'Target', 'Column']
+            ['Entry link type', 'Source Name', 'Source ID', 'Column', 'Target Name', 'Target ID']
         ]
         
-        type_idx, source_idx, target_idx, path_idx = sheet_utils.extract_column_indices(data)
+        type_idx, src_name_idx, src_id_idx, col_idx, tgt_name_idx, tgt_id_idx = sheet_utils.extract_column_indices(data)
         
         assert type_idx == 0
-        assert source_idx == 1
-        assert target_idx == 2
-        assert path_idx == 3
+        assert src_name_idx == 1
+        assert src_id_idx == 2
+        assert col_idx == 3
+        assert tgt_name_idx == 4
+        assert tgt_id_idx == 5
 
     def test_extracts_legacy_header_indices(self):
-        """Extract column indices from legacy snake_case headers"""
+        """Extract column indices from legacy headers"""
         data = [
             ['entry_link_type', 'source_entry', 'target_entry', 'source_path']
         ]
         
-        type_idx, source_idx, target_idx, path_idx = sheet_utils.extract_column_indices(data)
+        type_idx, src_name_idx, src_id_idx, col_idx, tgt_name_idx, tgt_id_idx = sheet_utils.extract_column_indices(data)
         
         assert type_idx == 0
-        assert source_idx == 1
-        assert target_idx == 2
-        assert path_idx == 3
+        assert src_name_idx == 1
+        assert src_id_idx == -1
+        assert col_idx == 3
+        assert tgt_name_idx == 2
+        assert tgt_id_idx == -1
     
     def test_handles_missing_path_column(self):
         """Handle missing column/source_path column"""
         data = [
-            ['Entry link type', 'Source', 'Target']
+            ['Entry link type', 'Source Name', 'Target Name']
         ]
         
-        type_idx, source_idx, target_idx, path_idx = sheet_utils.extract_column_indices(data)
+        type_idx, src_name_idx, src_id_idx, col_idx, tgt_name_idx, tgt_id_idx = sheet_utils.extract_column_indices(data)
         
         assert type_idx == 0
-        assert path_idx == -1
+        assert src_name_idx == 1
+        assert tgt_name_idx == 2
+        assert col_idx == -1
     
     def test_raises_on_missing_required_column(self):
         """Raise ValueError for missing required column"""
         data = [
-            ['Entry link type', 'Source']  # Missing Target
+            ['Entry link type', 'Source Name']  # Missing Target
         ]
         
         with pytest.raises(ValueError):
@@ -539,18 +552,18 @@ class TestEdgeCases:
     
     def test_handles_unicode_in_entries(self):
         """Handle Unicode characters in entry names"""
-        row = ['definition', 'source_éntrée', 'target_δοκιμή', '/путь']
+        row = ['definition', 'source_éntrée', 'src_id', '/путь', 'target_δοκιμή', 'tgt_id']
         
-        result = sheet_utils._create_entry_link_dict(row, 0, 1, 2, 3)
+        result = sheet_utils._create_entry_link_dict(row, 0, 1, 2, 3, 4, 5)
         
-        assert result['source_entry'] == 'source_éntrée'
-        assert result['target_entry'] == 'target_δοκιμή'
+        assert result['source_name'] == 'source_éntrée'
+        assert result['target_name'] == 'target_δοκιμή'
     
     def test_handles_empty_strings(self):
         """Handle empty strings in row"""
-        row = ['', '', '', '']
+        row = ['', '', '', '', '', '']
         
-        result = sheet_utils._create_entry_link_dict(row, 0, 1, 2, 3)
+        result = sheet_utils._create_entry_link_dict(row, 0, 1, 2, 3, 4, 5)
         
         assert result['entry_link_type'] == ''
-        assert result['source_entry'] == ''
+        assert result['source_name'] == ''

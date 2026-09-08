@@ -122,5 +122,6 @@ LINK_TYPES = {
 }
 
 # --- Google Sheets Headers ---
-ENTRYLINK_SHEET_HEADERS = ["Entry link type", "Source", "Column", "Target"]
+ENTRYLINK_SHEET_HEADERS = ["Entry link type", "Source Name", "Source ID", "Column", "Target Name", "Target ID"]
 LEGACY_ENTRYLINK_SHEET_HEADERS = ["entry_link_type", "source_entry", "target_entry", "source_path"]
+FOUR_COLUMN_ENTRYLINK_SHEET_HEADERS = ["Entry link type", "Source", "Column", "Target"]

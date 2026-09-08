@@ -247,3 +247,50 @@ def format_source_path_from_column(column: str, entry_group: str = "") -> str:
         return f"Schema.{cleaned}"
     return cleaned
 
+
+def extract_short_id(resource_or_entry_name: str) -> str:
+    """Extract a concise short ID from a full Dataplex entry or glossary term resource name.
+
+    Examples:
+        >>> extract_short_id("projects/p/locations/l/glossaries/g/terms/my-term")
+        'my-term'
+        >>> extract_short_id("projects/p/locations/l/entryGroups/@dataplex/entries/projects/p/locations/l/glossaries/g/terms/my-term")
+        'my-term'
+        >>> extract_short_id("projects/p/locations/l/entryGroups/@dataplex/entries/glossary:g.term:my-term")
+        'my-term'
+        >>> extract_short_id("projects/p/locations/l/entryGroups/@bigquery/entries/bigquery:p.d.my_table")
+        'my_table'
+        >>> extract_short_id("my-term")
+        'my-term'
+    """
+    if not resource_or_entry_name:
+        return ""
+    name = resource_or_entry_name.strip()
+
+    # 1. Match glossary term resource pattern: .../terms/<term_id>
+    term_match = re.search(r"/terms/(?P<term_id>[^/]+)$", name)
+    if term_match:
+        return term_match.group("term_id")
+
+    # 2. Match glossary term entry pattern: ...term:<term_id>
+    colon_term_match = re.search(r"term:(?P<term_id>[^/]+)$", name)
+    if colon_term_match:
+        return colon_term_match.group("term_id")
+
+    # 3. Match BigQuery FQN or entry: bigquery:project.dataset.table
+    if "bigquery:" in name:
+        bq_part = name.split("bigquery:")[-1]
+        if "." in bq_part:
+            return bq_part.split(".")[-1]
+        return bq_part
+
+    # 4. Fall back to last component after slash or colon
+    if "/" in name:
+        last_part = name.split("/")[-1]
+        if ":" in last_part:
+            return last_part.split(":")[-1]
+        return last_part
+
+    return name
+
+

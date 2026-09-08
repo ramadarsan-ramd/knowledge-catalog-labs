@@ -104,10 +104,14 @@ def check_and_clean_archive_folder(archive_dir: str) -> bool:
 def _find_column_indices_for_entries(header_row: List[str]) -> tuple:
     """Find column indices for source and target entry columns."""
     normalized_headers = [header.lower().strip() for header in header_row]
-    source_column_idx = sheet_utils._find_header_index(normalized_headers, ['source', 'source_entry', 'sourceentry'])
-    target_column_idx = sheet_utils._find_header_index(normalized_headers, ['target', 'target_entry', 'targetentry'])
+    source_column_idx = sheet_utils._find_header_index(
+        normalized_headers, ['source name', 'sourcename', 'source id', 'sourceid', 'source', 'source_entry', 'sourceentry']
+    )
+    target_column_idx = sheet_utils._find_header_index(
+        normalized_headers, ['target name', 'targetname', 'target id', 'targetid', 'target', 'target_entry', 'targetentry']
+    )
     if source_column_idx < 0 or target_column_idx < 0:
-        raise ValueError("Spreadsheet must have 'Source' (or 'source_entry') and 'Target' (or 'target_entry') columns")
+        raise ValueError("Spreadsheet must have 'Source Name'/'Source' and 'Target Name'/'Target' columns")
     return source_column_idx, target_column_idx
 
 
@@ -227,8 +231,10 @@ def convert_spreadsheet_to_entrylinks(
     if not spreadsheet_data or len(spreadsheet_data) < 2:
         return []
     
-    type_idx, source_idx, target_idx, path_idx = sheet_utils.extract_column_indices(spreadsheet_data)
-    row_dicts = sheet_utils.rows_to_entry_link_dicts(spreadsheet_data, type_idx, source_idx, target_idx, path_idx)
+    type_idx, source_name_idx, source_id_idx, column_idx, target_name_idx, target_id_idx = sheet_utils.extract_column_indices(spreadsheet_data)
+    row_dicts = sheet_utils.rows_to_entry_link_dicts(
+        spreadsheet_data, type_idx, source_name_idx, source_id_idx, column_idx, target_name_idx, target_id_idx
+    )
     
     entrylinks = [
         build_entry_link(
@@ -265,40 +271,74 @@ def _generate_entrylink_name(project_id: str, location: str, entry_group: str) -
 def _resolve_source_entry_name(
     source_str: str, 
     link_type: str, 
+    source_id: str = "",
     dataplex_service=None, 
     user_project: str = ""
 ) -> str:
-    """Resolve source string (FQN, term identifier, or full entry name) to Dataplex entry name."""
-    source_str = source_str.strip()
-    if source_str.startswith('projects/'):
-        return api_layer.normalize_entry_name_project_number(source_str, user_project)
+    """Resolve source identifier (name and/or ID) to Dataplex entry name."""
+    if source_id:
+        source_id = source_id.strip()
+        if source_id.startswith('projects/'):
+            if constants.TERM_NAME_PATTERN.match(source_id):
+                project_id = business_glossary_utils.extract_project_id_from_name(source_id)
+                project_number = api_layer.get_project_number(project_id, user_project) if user_project else ""
+                return business_glossary_utils.generate_entry_name_from_term_name(source_id, project_number=project_number)
+            return api_layer.normalize_entry_name_project_number(source_id, user_project)
+
+    source_val = source_str.strip() if source_str else source_id.strip()
+    if not source_val:
+        raise ValueError("Source name or ID must be provided")
+
+    if source_val.startswith('projects/'):
+        if constants.TERM_NAME_PATTERN.match(source_val):
+            project_id = business_glossary_utils.extract_project_id_from_name(source_val)
+            project_number = api_layer.get_project_number(project_id, user_project) if user_project else ""
+            return business_glossary_utils.generate_entry_name_from_term_name(source_val, project_number=project_number)
+        return api_layer.normalize_entry_name_project_number(source_val, user_project)
     
     if link_type == DP_LINK_TYPE_DEFINITION:
         if dataplex_service:
-            entry_res = api_layer.lookup_entry_by_fqn(dataplex_service, source_str, user_project)
+            entry_res = api_layer.lookup_entry_by_fqn(dataplex_service, source_val, user_project)
             if isinstance(entry_res, dict):
                 return api_layer.normalize_entry_name_project_number(entry_res.get('name', ''), user_project)
             return api_layer.normalize_entry_name_project_number(str(entry_res), user_project)
-        raise ValueError(f"Cannot resolve FQN '{source_str}' without Dataplex service")
+        raise ValueError(f"Cannot resolve FQN '{source_val}' without Dataplex service")
     else:
         if dataplex_service:
-            return api_layer.lookup_term_by_display_identifier(dataplex_service, source_str, user_project)
-        raise ValueError(f"Cannot resolve term identifier '{source_str}' without Dataplex service")
+            return api_layer.lookup_term_by_display_identifier(dataplex_service, source_val, user_project)
+        raise ValueError(f"Cannot resolve term identifier '{source_val}' without Dataplex service")
 
 
 def _resolve_target_entry_name(
     target_str: str, 
+    target_id: str = "",
     dataplex_service=None, 
     user_project: str = ""
 ) -> str:
-    """Resolve target string (term identifier or full entry name) to Dataplex entry name."""
-    target_str = target_str.strip()
-    if target_str.startswith('projects/'):
-        return api_layer.normalize_entry_name_project_number(target_str, user_project)
+    """Resolve target identifier (name and/or ID) to Dataplex entry name."""
+    if target_id:
+        target_id = target_id.strip()
+        if target_id.startswith('projects/'):
+            if constants.TERM_NAME_PATTERN.match(target_id):
+                project_id = business_glossary_utils.extract_project_id_from_name(target_id)
+                project_number = api_layer.get_project_number(project_id, user_project) if user_project else ""
+                return business_glossary_utils.generate_entry_name_from_term_name(target_id, project_number=project_number)
+            return api_layer.normalize_entry_name_project_number(target_id, user_project)
+
+    target_val = target_str.strip() if target_str else target_id.strip()
+    if not target_val:
+        raise ValueError("Target name or ID must be provided")
+
+    if target_val.startswith('projects/'):
+        if constants.TERM_NAME_PATTERN.match(target_val):
+            project_id = business_glossary_utils.extract_project_id_from_name(target_val)
+            project_number = api_layer.get_project_number(project_id, user_project) if user_project else ""
+            return business_glossary_utils.generate_entry_name_from_term_name(target_val, project_number=project_number)
+        return api_layer.normalize_entry_name_project_number(target_val, user_project)
     
     if dataplex_service:
-        return api_layer.lookup_term_by_display_identifier(dataplex_service, target_str, user_project)
-    raise ValueError(f"Cannot resolve term identifier '{target_str}' without Dataplex service")
+        return api_layer.lookup_term_by_display_identifier(dataplex_service, target_val, user_project)
+    raise ValueError(f"Cannot resolve term identifier '{target_val}' without Dataplex service")
 
 
 def build_entry_link(
@@ -314,13 +354,19 @@ def build_entry_link(
                       f"Expected one of: {list(constants.LINK_TYPES.keys())}. Row skipped.")
         return None
     
-    source_val = spreadsheet_row.source or spreadsheet_row.source_entry
-    target_val = spreadsheet_row.target or spreadsheet_row.target_entry
+    source_name = spreadsheet_row.source_name
+    source_id = spreadsheet_row.source_id
+    target_name = spreadsheet_row.target_name
+    target_id = spreadsheet_row.target_id
     column_val = spreadsheet_row.column or spreadsheet_row.source_path
     
     try:
-        source_entry = _resolve_source_entry_name(source_val, link_type, dataplex_service, user_project)
-        target_entry = _resolve_target_entry_name(target_val, dataplex_service, user_project)
+        source_entry = _resolve_source_entry_name(
+            source_name, link_type, source_id=source_id, dataplex_service=dataplex_service, user_project=user_project
+        )
+        target_entry = _resolve_target_entry_name(
+            target_name, target_id=target_id, dataplex_service=dataplex_service, user_project=user_project
+        )
     except Exception as resolve_error:
         logger.error(f"Resolution failed for row: {resolve_error}")
         return None
