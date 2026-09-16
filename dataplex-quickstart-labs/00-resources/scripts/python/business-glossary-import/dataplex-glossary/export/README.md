@@ -157,18 +157,22 @@ python3 entrylinks-export.py \
 
 ### Sheets file schema (EntryLinks)
 
-The first row of the sheet contains the following headers:
+The first row of the sheet contains the following 6 column headers:
 
-`Entry link type, Source, Column, Target`
+`Entry link type, Source Name, Source ID, Column, Target Name, Target ID`
 
 Where:
 
 *   `Entry link type` (required): Type of EntryLink. Valid values: `definition`, `synonym`, `related`.
-*   `Source` (required):
-    *   For `definition` links: Fully Qualified Name (FQN) of the data asset entry (e.g., `bigquery:project_id.dataset_id.table_name`).
+*   `Source Name` (required):
+    *   For `definition` links: Fully Qualified Name (FQN) of the data asset entry (e.g., `bigquery:project_id.dataset_id.table_name` or `custom:dataset_id.entry_name`).
     *   For `synonym` and `related` links: The 4-part term display identifier in format `<project>.<location>.<glossaryDisplayName>.<termDisplayName>`.
+*   `Source ID`: Short identifier of the source asset or term (e.g., `table_name` or term ID).
 *   `Column` (optional):
     *   For `definition` links: Specific column/field name within the data asset (e.g., `order_id` or `user.address.zip`). Leave empty for whole-table/entry definitions.
     *   For `synonym` and `related` links: Always left empty.
-*   `Target` (required): The 4-part term display identifier in format `<project>.<location>.<glossaryDisplayName>.<termDisplayName>`.
+*   `Target Name` (required): The 4-part term display identifier in format `<project>.<location>.<glossaryDisplayName>.<termDisplayName>`.
+*   `Target ID`: Short identifier of the target glossary term.
+
+*(Note: Legacy 4-column sheets `[Entry link type, Source, Column, Target]` and full Dataplex entry resource names remain supported for backward compatibility.)*
 

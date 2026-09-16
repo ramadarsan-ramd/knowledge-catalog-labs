@@ -146,16 +146,18 @@ python3 entrylinks-import.py \
 
 The first row of the sheet should contain the following headers:
 
-`Entry link type, Source, Column, Target`
+`Entry link type, Source Name, Source ID, Column, Target Name, Target ID`
 
 Where:
 
 *   `Entry link type` (required): Type of EntryLink. Valid values: `definition`, `synonym`, `related`.
-*   `Source` (required):
-    *   For `definition` links: Fully Qualified Name (FQN) of the data asset entry (e.g., `bigquery:project_id.dataset_id.table_name`). Full Dataplex entry resource names are also accepted.
+*   `Source Name`:
+    *   For `definition` links: Fully Qualified Name (FQN) of the data asset entry (e.g., `bigquery:project_id.dataset_id.table_name` or `custom:dataset_id.entry_name`). Full Dataplex entry resource names are also accepted.
     *   For `synonym` and `related` links: The 4-part term display identifier in format `<project>.<location>.<glossaryDisplayName>.<termDisplayName>`. Full Dataplex entry resource names are also accepted.
-*   `Column` (optional):
-    *   For `definition` links: Specific column/field name within the data asset (e.g., `order_id` or `user.address.zip`). Leave empty for whole-table/entry definitions.
-    *   For `synonym` and `related` links: Always left empty.
-*   `Target` (required): The 4-part term display identifier in format `<project>.<location>.<glossaryDisplayName>.<termDisplayName>`. Full Dataplex entry resource names are also accepted.
+*   `Source ID` (optional): Short ID of the source asset or term.
+*   `Column` (optional): Specific column/field name within the data asset (e.g., `order_id` or `user.address.zip`). Leave empty for whole-table/entry definitions and synonym/related links.
+*   `Target Name`: The 4-part term display identifier in format `<project>.<location>.<glossaryDisplayName>.<termDisplayName>`. Full Dataplex entry resource names are also accepted.
+*   `Target ID` (optional): Short ID of the target term.
+
+*(Note: 4-column sheets `[Entry link type, Source, Column, Target]` and legacy full-entry-name sheets remain fully supported for backward compatibility.)*
 

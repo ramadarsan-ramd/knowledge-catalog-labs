@@ -26,7 +26,22 @@ from .constants import (
     TERM_NAME_PATTERN,
 )
 
-from .error import *
+from .error import (
+    DataplexAPIError,
+    EntryFQNNotFoundError,
+    GlossaryNotFoundError,
+    InvalidCategoryNameError,
+    InvalidEntryIdFormatError,
+    InvalidGlossaryNameError,
+    InvalidSpreadsheetURLError,
+    InvalidTermIdentifierError,
+    InvalidTermNameError,
+    NetworkError,
+    NoCategoriesFoundError,
+    NoTermsFoundError,
+    SheetsAPIError,
+    TermNotFoundError,
+)
 from .retry_utils import execute_with_retry, is_retryable_google_api_error
 
 logger = logging_utils.get_logger()
@@ -193,6 +208,7 @@ def lookup_entry_links_for_term(
     location: Optional[str] = None
 ) -> Optional[List[Dict]]:
     """Looks up EntryLinks for a glossary term with pagination."""
+    target_location = location or "unknown"
     try:
         project_id, entry_location, _, _ = parse_entry_name(term_entry_name)
         target_location = location if location else entry_location        
@@ -216,8 +232,7 @@ def lookup_entry_links_for_term(
         return all_entry_links if all_entry_links else None
         
     except Exception as lookup_error:
-        loc = target_location if 'target_location' in dir() else location or 'unknown'
-        logger.error(f"Error while looking up entry links for {term_entry_name} in {loc}: {lookup_error}")
+        logger.error(f"Error while looking up entry links for {term_entry_name} in {target_location}: {lookup_error}")
         return None
 
 

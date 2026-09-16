@@ -17,7 +17,7 @@ from utils.retry_utils import execute_with_retry, is_network_error
 logger = logging_utils.get_logger()
 
 
-def authenticate_sheets() -> build:
+def authenticate_sheets() -> Any:
     """Authenticate with Google Sheets API with retry for transient errors."""
     def _do_auth():
         logger.debug("[SHEETS AUTH] Authenticating with Google Sheets API...")
